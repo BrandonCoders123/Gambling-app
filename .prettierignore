@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.data/
+data/nfl-snapshot.json
+docs/PRD.md
+package-lock.json
+test-results/
