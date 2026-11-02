@@ -106,10 +106,15 @@ export function GameCard({
     <Link to={'/games/' + game.id} className={'game-card ' + (compact ? 'compact' : '')}>
       <div className="game-meta">
         <span>
-          {date(game.starts_at)} <span>·</span> W{game.week}
+          {date(game.starts_at)} <span>·</span>{' '}
+          {game.type === 'REG' ? 'Regular season' : 'Postseason · ' + game.type} · W{game.week}
         </span>
         <span className={game.home_score === null ? 'scheduled' : 'final'}>
-          {game.home_score === null ? 'SCHEDULED' : 'FINAL'}
+          {game.home_score !== null
+            ? 'FINAL'
+            : new Date(game.starts_at).getTime() > Date.now()
+              ? 'UPCOMING'
+              : 'RESULT UNAVAILABLE'}
         </span>
       </div>
       <div className="game-row">
@@ -855,8 +860,11 @@ export function PlayerDetail() {
 }
 export function TeamDetail() {
   const { id } = useParams(),
-    { season } = useApp();
-  const r = useResource<any>(`/teams/${id}?season=${season}`);
+    { meta, setSeason } = useApp();
+  const [params, setParams] = useSearchParams();
+  const selected = params.get('season');
+  const r = useResource<any>(`/teams/${id}${selected ? '?season=' + selected : ''}`);
+  const season = r.data?.season;
   const t = r.data;
   return (
     <Load {...r}>
@@ -878,6 +886,26 @@ export function TeamDetail() {
               Team community
             </Link>
           </div>
+          <label className="select-label">
+            Team season
+            <select
+              aria-label="Team season"
+              value={season || ''}
+              onChange={(e) => setParams({ season: e.target.value })}
+            >
+              {(meta?.gameSeasons || []).map((year: number) => (
+                <option key={year}>{year}</option>
+              ))}
+            </select>
+          </label>
+          <p className="source-note">
+            Source: <a href={t.source}>nflverse</a> · {season} season · Not a live feed.
+          </p>
+          {t.limitations.map((note: string) => (
+            <p className="muted" key={note}>
+              {note}
+            </p>
+          ))}
           <div className="stats-grid">
             {[
               [
@@ -885,6 +913,8 @@ export function TeamDetail() {
                 t.games.filter(
                   (g: any) =>
                     g.type === 'REG' &&
+                    g.home_score !== null &&
+                    g.away_score !== null &&
                     (g.home_id === id ? g.home_score > g.away_score : g.away_score > g.home_score),
                 ).length,
               ],
@@ -893,6 +923,8 @@ export function TeamDetail() {
                 t.games.filter(
                   (g: any) =>
                     g.type === 'REG' &&
+                    g.home_score !== null &&
+                    g.away_score !== null &&
                     (g.home_id === id ? g.home_score < g.away_score : g.away_score < g.home_score),
                 ).length,
               ],
@@ -906,18 +938,30 @@ export function TeamDetail() {
               </div>
             ))}
           </div>
+          <section className="panel panel-padding">
+            <h2>Regular-season team statistics</h2>
+            <StatValues stats={Object.keys(t.stats).length ? t.stats : null} />
+          </section>
           <div className="two-columns">
             <section className="panel">
               <div className="panel-heading">
                 <h2>Player roster</h2>
-                <span className="muted">Players with recorded stats</span>
+                <span className="muted">
+                  {t.rosterAvailable ? 'Full available roster' : 'Partial roster'}
+                </span>
               </div>
               {t.players.map((p: Player) => (
-                <Link className="list-row" to={'/players/' + p.id} key={p.id}>
+                <div className="list-row" key={p.id}>
                   <span className="position-tag">{p.position}</span>
-                  <strong>{p.name}</strong>
-                  <ArrowUpRight size={16} />
-                </Link>
+                  {p.stats ? (
+                    <Link to={'/players/' + p.id} onClick={() => setSeason(season)}>
+                      <strong>{p.name}</strong>
+                    </Link>
+                  ) : (
+                    <strong>{p.name}</strong>
+                  )}
+                  {!p.stats && <small>Season statistics unavailable</small>}
+                </div>
               ))}
             </section>
             <section>
@@ -925,13 +969,28 @@ export function TeamDetail() {
                 <h2>Season schedule & results</h2>
               </div>
               <div className="game-grid two">
-                {t.games.map((g: any) => (
-                  <GameCard key={g.id} game={g} teams={[t]} />
+                {t.schedule.map((g: any) => (
+                  <div key={g.id || g.week}>
+                    <p>
+                      Week {g.week} · {g.type === 'REG' ? 'Regular season' : 'Postseason'} ·{' '}
+                      {g.result || (g.status === 'bye' ? 'Bye week' : g.status)}
+                    </p>
+                    {g.id && <GameCard game={g} teams={[t]} />}
+                    {g.id && (
+                      <StatValues
+                        stats={
+                          t.teamWeekly.find(
+                            (w: any) =>
+                              w.week === g.week && w.type === (g.type === 'REG' ? 'REG' : 'POST'),
+                          )?.stats
+                        }
+                      />
+                    )}
+                  </div>
                 ))}
               </div>
             </section>
           </div>
-          <SourceNote />
         </>
       )}
     </Load>
@@ -1081,13 +1140,17 @@ export function Compare() {
 export function Games() {
   const { meta } = useApp();
   const [year, setYear] = useState(0),
-    [week, setWeek] = useState(''),
+    [week, setWeek] = useState('1'),
     [page, setPage] = useState(1);
   const selected = year || meta?.gameSeasons?.[0] || 2026;
+  const [phase, setPhase] = useState('REG');
   const r = useResource<any>(
-      `/games?season=${selected}&page=${page}${week ? '&week=' + week : ''}`,
+      `/games?season=${selected}&page=${page}&type=${phase}${week ? '&week=' + week : ''}`,
     ),
     teams = useResource<Team[]>('/teams');
+  const weekly = useResource<any>(
+    week ? `/weeks?season=${selected}&week=${week}&type=${phase}` : null,
+  );
   return (
     <>
       <Heading
@@ -1122,52 +1185,110 @@ export function Games() {
             }}
           >
             <option value="">All weeks</option>
-            {Array.from({ length: 22 }, (_, i) => (
-              <option key={i} value={i + 1}>
-                Week {i + 1}
+            {Array.from({ length: phase === 'REG' ? (selected >= 2021 ? 18 : 17) : 4 }, (_, i) => (
+              <option key={i} value={i + (phase === 'REG' ? 1 : selected >= 2021 ? 19 : 18)}>
+                Week {i + (phase === 'REG' ? 1 : selected >= 2021 ? 19 : 18)}
               </option>
             ))}
           </select>
         </label>
+        <label className="select-label">
+          Season phase
+          <select
+            aria-label="Season phase"
+            value={phase}
+            onChange={(e) => {
+              setPhase(e.target.value);
+              setWeek(e.target.value === 'REG' ? '1' : '19');
+              setPage(1);
+            }}
+          >
+            <option value="REG">Regular season</option>
+            <option value="POST">Postseason</option>
+          </select>
+        </label>
         <span className="muted">Times shown in your local timezone</span>
       </div>
-      <Load loading={r.loading || teams.loading} error={r.error || teams.error}>
-        <div className="game-grid">
-          {r.data?.items.map((g: any) => (
-            <GameCard key={g.id} game={g} teams={teams.data || []} />
-          ))}
-        </div>
-        {!r.data?.items.length && (
-          <div className="empty">
-            <CalendarDays />
-            <h3>No games in this selection</h3>
-            <p>Try a different week or season.</p>
+      {week ? (
+        <Load {...weekly}>
+          <div className="team-grid">
+            {weekly.data?.teams.map((t: any) => (
+              <section className="panel panel-padding" key={t.id}>
+                <Link to={'/teams/' + t.id}>
+                  <h2>{t.name}</h2>
+                </Link>
+                <p>
+                  Week {week} · {phase === 'REG' ? 'Regular season' : 'Postseason'} ·{' '}
+                  {t.game?.result ||
+                    (t.status === 'bye'
+                      ? 'Bye week'
+                      : t.status === 'unavailable'
+                        ? 'Game / result unavailable'
+                        : t.status)}
+                </p>
+                {t.game?.id && <GameCard game={t.game} teams={teams.data || []} />}
+                <h3>Weekly team statistics</h3>
+                <StatValues stats={t.stats} />
+                <details>
+                  <summary>Weekly player statistics ({t.players.length})</summary>
+                  {!t.players.length && <p>Player statistics unavailable for this week.</p>}
+                  {t.players.map((p: any) => (
+                    <div key={p.player_id}>
+                      <strong>
+                        {p.name} · {p.position}
+                      </strong>
+                      <StatValues stats={p.stats} />
+                    </div>
+                  ))}
+                </details>
+              </section>
+            ))}
           </div>
-        )}
-        <div className="pagination">
-          <button
-            className="btn outline"
-            disabled={page === 1}
-            onClick={() => setPage((p) => p - 1)}
-          >
-            Previous
-          </button>
-          <span>
-            Page {page} of {Math.max(1, Math.ceil((r.data?.total || 0) / 32))}
-          </span>
-          <button
-            className="btn outline"
-            disabled={page * 32 >= (r.data?.total || 0)}
-            onClick={() => setPage((p) => p + 1)}
-          >
-            Next
-          </button>
-        </div>
-        <p className="source-note">
-          Schedule source: nflverse / nfldata. Not a live scoreboard. Confirm kickoff times with the
-          league.
-        </p>
-      </Load>
+          <p className="source-note">
+            Source: nflverse weekly player/team statistics and nfldata schedules. Missing results
+            and statistics remain unavailable. Historical player totals use the source’s season-team
+            association.
+          </p>
+        </Load>
+      ) : (
+        <Load loading={r.loading || teams.loading} error={r.error || teams.error}>
+          <div className="game-grid">
+            {r.data?.items.map((g: any) => (
+              <GameCard key={g.id} game={g} teams={teams.data || []} />
+            ))}
+          </div>
+          {!r.data?.items.length && (
+            <div className="empty">
+              <CalendarDays />
+              <h3>No games in this selection</h3>
+              <p>Try a different week or season.</p>
+            </div>
+          )}
+          <div className="pagination">
+            <button
+              className="btn outline"
+              disabled={page === 1}
+              onClick={() => setPage((p) => p - 1)}
+            >
+              Previous
+            </button>
+            <span>
+              Page {page} of {Math.max(1, Math.ceil((r.data?.total || 0) / 32))}
+            </span>
+            <button
+              className="btn outline"
+              disabled={page * 32 >= (r.data?.total || 0)}
+              onClick={() => setPage((p) => p + 1)}
+            >
+              Next
+            </button>
+          </div>
+          <p className="source-note">
+            Schedule source: nflverse / nfldata. Not a live scoreboard. Confirm kickoff times with
+            the league.
+          </p>
+        </Load>
+      )}
     </>
   );
 }
@@ -1333,5 +1454,66 @@ export function SearchPage() {
           ))}
       </Load>
     </>
+  );
+}
+
+export function StatValues({ stats }: { stats?: Record<string, number> | null }) {
+  if (!stats || !Object.keys(stats).length) return <p className="muted">Statistics unavailable.</p>;
+  return (
+    <dl className="football-stats">
+      {Object.entries(stats).map(([key, value]) => (
+        <div key={key}>
+          <dt>{metrics[key] || key.replaceAll('_', ' ')}</dt>
+          <dd>{num(value)}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+export function FavoriteTeamsSection() {
+  const { user, favorites } = useApp();
+  const teams = useResource<Team[]>(user ? '/teams' : null);
+  return (
+    <section aria-labelledby="my-favorite-teams">
+      <h2 id="my-favorite-teams" className="section-title">
+        My Favorite Teams
+      </h2>
+      {!user ? (
+        <SignInPrompt />
+      ) : (
+        <Load {...teams}>
+          <p className="muted">
+            Follow multiple NFL teams. Your selections are saved to your account.
+          </p>
+          <div className="team-grid">
+            {teams.data
+              ?.filter((t) => favorites.teams.includes(t.id))
+              .map((t) => (
+                <div className="panel favorite-tile" key={t.id}>
+                  <Link to={'/teams/' + t.id}>
+                    <Badge team={t} />
+                    <h3>{t.name}</h3>
+                  </Link>
+                  <Follow type="teams" id={t.id} compact />
+                </div>
+              ))}
+          </div>
+          {!favorites.teams.length && <p>No favorite teams yet. Choose teams below.</p>}
+          <details>
+            <summary>Add NFL teams</summary>
+            <div className="team-grid">
+              {teams.data
+                ?.filter((t) => !favorites.teams.includes(t.id))
+                .map((t) => (
+                  <div className="panel favorite-tile" key={t.id}>
+                    <span>{t.name}</span>
+                    <Follow type="teams" id={t.id} />
+                  </div>
+                ))}
+            </div>
+          </details>
+        </Load>
+      )}
+    </section>
   );
 }

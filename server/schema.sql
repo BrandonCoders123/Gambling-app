@@ -81,3 +81,21 @@ CREATE TABLE IF NOT EXISTS audit_logs (id uuid PRIMARY KEY, actor_id uuid REFERE
 CREATE TABLE IF NOT EXISTS activity_events (id uuid PRIMARY KEY, user_id uuid REFERENCES users ON DELETE CASCADE, kind text NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS activity_dates ON activity_events(created_at,user_id);
 INSERT INTO schema_versions(version) VALUES (1) ON CONFLICT DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS team_rosters (
+ player_id text NOT NULL, team_id text NOT NULL REFERENCES teams, season integer NOT NULL,
+ name text NOT NULL, position text NOT NULL, status text NOT NULL,
+ PRIMARY KEY(player_id,team_id,season)
+);
+CREATE TABLE IF NOT EXISTS player_weekly (
+ player_id text NOT NULL, team_id text NOT NULL REFERENCES teams, season integer NOT NULL,
+ week integer NOT NULL CHECK(week BETWEEN 1 AND 30), type text NOT NULL CHECK(type IN ('REG','POST')),
+ name text NOT NULL, position text NOT NULL, stats jsonb NOT NULL,
+ PRIMARY KEY(player_id,team_id,season,week,type)
+);
+CREATE TABLE IF NOT EXISTS team_weekly (
+ team_id text NOT NULL REFERENCES teams, season integer NOT NULL, week integer NOT NULL CHECK(week BETWEEN 1 AND 30),
+ type text NOT NULL CHECK(type IN ('REG','POST')), stats jsonb NOT NULL,
+ PRIMARY KEY(team_id,season,week,type)
+);
+INSERT INTO schema_versions(version) VALUES (2) ON CONFLICT DO NOTHING;

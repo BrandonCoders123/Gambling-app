@@ -268,6 +268,7 @@ test('predictions reject outsiders and past games, update once, score idempotent
   const r = await request(app).get('/api/predictions/leaderboard').expect(200);
   assert.equal(r.body.data[0].points, 1);
   assert.equal(r.body.data[0].played, 1);
+  await db.query('DELETE FROM games WHERE id=$1', [id]);
 });
 test('repeated sports imports preserve IDs and avoid duplicates', async () => {
   const snapshot = JSON.parse(await fs.readFile('data/nfl-snapshot.json', 'utf8'));
@@ -346,8 +347,86 @@ test('deactivation revokes sessions and disables subsequent sign-ins', async () 
 test('PostgreSQL application state survives closing and reopening the database', async () => {
   await db.close();
   db = await connect();
+  app = createApp(db);
   const [u] = await db.query('SELECT username FROM users WHERE id=$1', [alice.id]);
   assert.equal(u.username, 'alice');
   const f = await db.query('SELECT * FROM favorite_teams WHERE user_id=$1', [alice.id]);
   assert.equal(f[0].team_id, 'KC');
+});
+
+test('weekly NFL data preserves scores, all teams, byes, phases, and missing statistics', async () => {
+  const snapshot = JSON.parse(await fs.readFile('data/nfl-snapshot.json', 'utf8'));
+  const latest = Math.max(...snapshot.games.map((g: any) => g.season));
+  const response = await request(app)
+    .get(`/api/weeks?season=${latest}&week=1&type=REG`)
+    .expect(200);
+  assert.equal(response.body.data.teams.length, 32);
+  const sample = snapshot.teamWeekly.find((w: any) => w.season === latest && w.week === 1);
+  const team = response.body.data.teams.find((t: any) => t.id === sample.team);
+  assert.deepEqual(team.stats, sample.stats);
+  const original = snapshot.games.find(
+    (g: any) =>
+      g.season === latest && g.week === 1 && (g.home === sample.team || g.away === sample.team),
+  );
+  assert.equal(team.game.home_score, original.homeScore);
+  assert.equal(team.game.away_score, original.awayScore);
+  assert.ok(team.players.length > 0);
+  const future = await request(app).get(`/api/weeks?season=${latest}&week=18`).expect(200);
+  assert.ok(future.body.data.teams.every((t: any) => t.stats === null && t.players.length === 0));
+  const post = await request(app).get('/api/weeks?season=2024&week=19&type=POST').expect(200);
+  assert.ok(post.body.data.teams.some((t: any) => t.game?.type === 'WC'));
+  assert.ok(post.body.data.teams.every((t: any) => !t.game || t.game.type !== 'REG'));
+  const bye = snapshot.games.filter(
+    (g: any) => g.season === latest && g.type === 'REG' && (g.home === 'KC' || g.away === 'KC'),
+  );
+  const byeWeek = Array.from({ length: 18 }, (_, i) => i + 1).find(
+    (w) => !bye.some((g: any) => g.week === w),
+  );
+  const byes = await request(app).get(`/api/weeks?season=${latest}&week=${byeWeek}`).expect(200);
+  assert.equal(byes.body.data.teams.find((t: any) => t.id === 'KC').status, 'bye');
+  const allPost = (await request(app).get('/api/games?season=2024&type=POST').expect(200)).body
+    .data;
+  assert.ok(allPost.items.length > 0);
+  assert.ok(allPost.items.every((g: any) => g.type !== 'REG'));
+  await request(app).get('/api/weeks?week=0').expect(400);
+  await request(app).get('/api/weeks?type=invalid').expect(400);
+});
+test('team pages default to latest schedule season and include non-offensive roster members', async () => {
+  const meta = (await request(app).get('/api/meta')).body.data;
+  const team = (await request(app).get('/api/teams/KC').expect(200)).body.data;
+  assert.equal(team.season, meta.gameSeasons[0]);
+  assert.equal(team.rosterAvailable, true);
+  assert.ok(
+    team.players.some((p: any) =>
+      ['CB', 'S', 'LB', 'DT', 'DE', 'OT', 'G', 'C', 'LS'].includes(p.position),
+    ),
+  );
+  assert.ok(team.players.some((p: any) => p.stats === null));
+  assert.equal(team.games.filter((g: any) => g.type === 'REG').length, 17);
+  assert.ok(Object.keys(team.stats).length > 0);
+  const old = (await request(app).get('/api/teams/KC?season=2024').expect(200)).body.data;
+  assert.equal(old.season, 2024);
+  assert.ok(old.games.some((g: any) => g.type === 'SB'));
+  assert.ok(old.players.length > 0);
+  assert.equal(old.rosterAvailable, false);
+  assert.match(old.limitations.join(' '), /Full roster unavailable/);
+});
+test('multiple favorite teams persist after logout on another device and removals stay consistent', async () => {
+  const fan = await account('weeklyfan');
+  for (const id of ['KC', 'BUF'])
+    await write(fan.agent, 'put', '/api/favorites/teams/' + id, { following: true }).expect(200);
+  await write(fan.agent, 'post', '/api/auth/logout').expect(200);
+  const device = request.agent(app);
+  await write(device, 'post', '/api/auth/login', { email: fan.email, password: secret }).expect(
+    200,
+  );
+  assert.deepEqual((await device.get('/api/favorites')).body.data.teams.sort(), ['BUF', 'KC']);
+  await write(device, 'put', '/api/favorites/teams/KC', { following: false }).expect(200);
+  const third = request.agent(app);
+  await write(third, 'post', '/api/auth/login', { email: fan.email, password: secret }).expect(200);
+  assert.deepEqual((await third.get('/api/favorites')).body.data.teams, ['BUF']);
+  assert.deepEqual(
+    (await third.get('/api/dashboard')).body.data.favorites.map((t: any) => t.id),
+    ['BUF'],
+  );
 });

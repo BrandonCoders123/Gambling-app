@@ -4181,3 +4181,29 @@ dialog hr {
   font-size: 9px;
   color: #586b4f;
 }
+
+.football-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+  margin: 16px 0;
+}
+.football-stats dt {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: capitalize;
+}
+.football-stats dd {
+  margin: 0;
+  font-weight: 700;
+}
+#my-favorite-teams {
+  margin-top: 20px;
+}
+details {
+  margin: 16px 0;
+}
+summary {
+  cursor: pointer;
+  font-weight: 600;
+}

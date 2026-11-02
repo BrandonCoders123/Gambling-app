@@ -30,7 +30,44 @@ const snapshotSchema = z.object({
         weekly: z.array(z.record(z.string(), z.number().finite())),
       }),
     )
-    .max(5000),
+    .max(20000),
+  roster: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        position: z.string(),
+        team: z.string(),
+        season: z.number().int(),
+        status: z.string(),
+      }),
+    )
+    .default([]),
+  weekly: z
+    .array(
+      z.object({
+        player: z.string(),
+        name: z.string(),
+        position: z.string(),
+        team: z.string(),
+        season: z.number().int(),
+        week: z.number().int().min(1).max(30),
+        type: z.enum(['REG', 'POST']),
+        stats: z.record(z.string(), z.number().finite()),
+      }),
+    )
+    .default([]),
+  teamWeekly: z
+    .array(
+      z.object({
+        team: z.string(),
+        season: z.number().int(),
+        week: z.number().int().min(1).max(30),
+        type: z.enum(['REG', 'POST']),
+        stats: z.record(z.string(), z.number().finite()),
+      }),
+    )
+    .default([]),
   games: z
     .array(
       z.object({
@@ -100,6 +137,37 @@ export async function importSnapshot(db: Database, input: unknown, existingJob?:
           [p.id, p.season, p.team, JSON.stringify(p.stats), JSON.stringify(p.weekly)],
         );
       }
+      for (const season of new Set(data.roster.map((r) => r.season)))
+        await q('DELETE FROM team_rosters WHERE season=$1', [season]);
+      for (const season of new Set(data.weekly.map((r) => r.season)))
+        await q('DELETE FROM player_weekly WHERE season=$1', [season]);
+      for (const season of new Set(data.teamWeekly.map((r) => r.season)))
+        await q('DELETE FROM team_weekly WHERE season=$1', [season]);
+      for (const r of data.roster)
+        await q(
+          'INSERT INTO team_rosters(player_id,team_id,season,name,position,status) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(player_id,team_id,season) DO UPDATE SET name=excluded.name,position=excluded.position,status=excluded.status',
+          [r.id, r.team, r.season, r.name, r.position, r.status],
+        );
+      // Legacy weekly records remain available, explicitly using their recorded season-team association.
+      const modernSeasons = new Set(data.weekly.map((w) => w.season));
+      for (const p of data.players.filter((p) => !modernSeasons.has(p.season)))
+        for (const w of p.weekly) {
+          const { week, ...stats } = w;
+          await q(
+            "INSERT INTO player_weekly(player_id,team_id,season,week,type,name,position,stats) VALUES($1,$2,$3,$4,'REG',$5,$6,$7) ON CONFLICT DO NOTHING",
+            [p.id, p.team, p.season, week, p.name, p.position, JSON.stringify(stats)],
+          );
+        }
+      for (const w of data.weekly)
+        await q(
+          'INSERT INTO player_weekly(player_id,team_id,season,week,type,name,position,stats) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(player_id,team_id,season,week,type) DO UPDATE SET stats=excluded.stats,name=excluded.name,position=excluded.position',
+          [w.player, w.team, w.season, w.week, w.type, w.name, w.position, JSON.stringify(w.stats)],
+        );
+      for (const w of data.teamWeekly)
+        await q(
+          'INSERT INTO team_weekly(team_id,season,week,type,stats) VALUES($1,$2,$3,$4,$5) ON CONFLICT(team_id,season,week,type) DO UPDATE SET stats=excluded.stats',
+          [w.team, w.season, w.week, w.type, JSON.stringify(w.stats)],
+        );
       for (const g of data.games)
         await q(
           'INSERT INTO games(id,season,week,type,home_id,away_id,starts_at,home_score,away_score,stadium,source,kickoff_confirmed) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(id) DO UPDATE SET starts_at=excluded.starts_at,home_score=excluded.home_score,away_score=excluded.away_score,stadium=excluded.stadium,kickoff_confirmed=excluded.kickoff_confirmed',

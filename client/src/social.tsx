@@ -19,7 +19,7 @@ import {
   Pencil,
 } from 'lucide-react';
 import { api, useApp, useResource, Load, Modal, Badge, date, num, type Team } from './lib';
-import { Heading, SignInPrompt, GameCard } from './sports';
+import { Heading, SignInPrompt, GameCard, FavoriteTeamsSection } from './sports';
 export function Communities() {
   const { user, notify, refresh, requireUser } = useApp();
   const r = useResource<any[]>('/communities');
@@ -42,6 +42,7 @@ export function Communities() {
         title="The stands are always open."
         description="Your team. Your takes. A community that gets it."
       />
+      <FavoriteTeamsSection />
       <div className="filter-bar">
         <label className="search-input">
           <Search size={17} />

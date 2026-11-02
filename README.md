@@ -49,18 +49,20 @@ Restart the app and open Moderation & admin. There are no default passwords or s
 
 ## Data provenance and refresh
 
-See [data sources and limitations](data/README.md). The included snapshot contains **32 teams, 1,195 player-season records for 2023 and 2024, and 1,127 games across 2023–2026**. It is historical data plus a sourced schedule, not a live feed. No user accounts, community engagement, predictions, or statistics are fabricated to fill the UI.
+See [data sources and limitations](data/README.md). The included snapshot contains **32 teams, 2,929 player-season records for 2023, 2024, and 2026, and 1,127 games across 2023–2026**, plus 3,063 roster records and weekly player/team statistics for 2026 through week 8. It is historical data plus a sourced schedule, not a live feed. No user accounts, community engagement, predictions, or statistics are fabricated to fill the UI.
 
 ```sh
-npm run data:fetch -- 2024  # Download and validate public nflverse CSVs; update the snapshot.
+npm run data:fetch -- 2026  # Download and validate public nflverse CSVs; update the snapshot.
 npm run db:import          # Transactionally upsert snapshot, score completed games.
 ```
 
-Fetching another supported archived season merges that season with the existing snapshot. The data provider's legacy `player_stats` release currently contains 2023/2024 files; a missing season returns an explicit provider error. Adding a newer nflverse feed format requires mapping and validating that provider's schema rather than pretending a failed refresh succeeded.
+Fetching another supported archived season merges that season with the existing snapshot. The importer supports the legacy offensive `player_stats` feed for 2023/2024 and the current `stats_player_week` and `stats_team_week` feeds for newer seasons, plus season roster snapshots. The default fetch season follows the current NFL calendar (January/February belong to the preceding season). Explicit missing provider assets fail the refresh without overwriting the installed snapshot.
+
+Schedule & results now supports season/week and regular-season/postseason browsing for all 32 teams. Final W/L/T comes only from recorded scores; past games without results remain unavailable. Bye labels require a complete regular-season team schedule. Team links default to the newest installed schedule season, independently of the global statistics selector; the team page has its own historical selector. Communities includes **My Favorite Teams**, sharing the existing account-backed favorites API and tables.
 
 Administrators can import the installed snapshot or queue a fresh provider download from the Data & audit tab. Provider downloads run outside the HTTP response path; their actual result is recorded in synchronization history. Refresh status to see completion. Repeated imports keep stable provider IDs and do not duplicate records. Failed imports roll back. A database uniqueness constraint prevents concurrent sync jobs for the same source.
 
-Optional scheduled refresh: set `SYNC_INTERVAL_MINUTES=60` (minimum 15) and `SYNC_SEASON=2024`. The next interval retries failed jobs. Enable this only on a persistent server process; use an external scheduler on platforms that suspend instances. After a hard crash, an administrator/operator must inspect any stale `running` sync job and mark it failed before retrying. Active processes and scheduled timers do not survive environment snapshots.
+Optional scheduled refresh: set `SYNC_INTERVAL_MINUTES=60` (minimum 15) and `SYNC_SEASON=2026`. The next interval retries failed jobs. Enable this only on a persistent server process; use an external scheduler on platforms that suspend instances. After a hard crash, an administrator/operator must inspect any stale `running` sync job and mark it failed before retrying. Active processes and scheduled timers do not survive environment snapshots.
 
 ## Validation
 

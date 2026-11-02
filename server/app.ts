@@ -1,3 +1,4 @@
+import { latestSeason, scheduleWeeks, gameState } from './football.js';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
@@ -261,7 +262,9 @@ export function createApp(db: Database) {
       league: 'NFL',
       communityCount: count(await db.query('SELECT count(*)::integer count FROM communities')),
       seasons: (
-        await db.query('SELECT DISTINCT season FROM player_seasons ORDER BY season DESC')
+        await db.query(
+          'SELECT season FROM player_seasons UNION SELECT season FROM games ORDER BY season DESC',
+        )
       ).map((s) => s.season),
       gameSeasons: (await db.query('SELECT DISTINCT season FROM games ORDER BY season DESC')).map(
         (s) => s.season,
@@ -288,16 +291,87 @@ export function createApp(db: Database) {
   app.get('/api/teams/:id', async (req, res) => {
     const [t] = await db.query('SELECT * FROM teams WHERE id=$1', [req.params.id]);
     if (!t) fail(404, 'Team not found.');
+    const season = req.query.season ? seasonOf(req) : await latestSeason(db);
+    const games = await db.query(
+      'SELECT * FROM games WHERE (home_id=$1 OR away_id=$1) AND season=$2 ORDER BY starts_at',
+      [t.id, season],
+    );
+    const roster = await db.query(
+      `SELECT r.player_id id,r.name,r.position,r.status,s.stats FROM team_rosters r LEFT JOIN player_seasons s ON s.player_id=r.player_id AND s.season=r.season AND s.team_id=r.team_id WHERE r.team_id=$1 AND r.season=$2 ORDER BY r.name`,
+      [t.id, season],
+    );
+    const teamWeekly = await db.query(
+      'SELECT * FROM team_weekly WHERE team_id=$1 AND season=$2 ORDER BY week',
+      [t.id, season],
+    );
+    const stats: Record<string, number> = {};
+    for (const w of teamWeekly.filter((w) => w.type === 'REG'))
+      for (const [key, value] of Object.entries(w.stats))
+        stats[key] = (stats[key] || 0) + Number(value);
     out(res, {
       ...t,
-      players: await db.query(
-        'SELECT p.*,s.stats FROM players p JOIN player_seasons s ON p.id=s.player_id WHERE s.team_id=$1 AND s.season=$2 ORDER BY p.name',
-        [t.id, seasonOf(req)],
-      ),
-      games: await db.query(
-        'SELECT * FROM games WHERE (home_id=$1 OR away_id=$1) AND season=$2 ORDER BY starts_at',
-        [t.id, seasonOf(req)],
-      ),
+      season,
+      stats,
+      teamWeekly,
+      rosterAvailable: roster.length > 0,
+      players: roster.length
+        ? roster
+        : await db.query(
+            'SELECT p.*,s.stats FROM players p JOIN player_seasons s ON p.id=s.player_id WHERE s.team_id=$1 AND s.season=$2 ORDER BY p.name',
+            [t.id, season],
+          ),
+      games: games.map((g) => ({ ...g, status: gameState(g) })),
+      schedule: scheduleWeeks(games, t.id, season),
+      limitations: [
+        'Season totals cover regular-season games only.',
+        ...(roster.length
+          ? []
+          : ['Full roster unavailable; only players with recorded statistics are listed.']),
+        ...(teamWeekly.length ? [] : ['Team statistics unavailable for this season.']),
+        'Roster is the provider’s season snapshot; trades and inactive players may appear.',
+      ],
+    });
+  });
+  app.get('/api/weeks', async (req, res) => {
+    const season = req.query.season ? seasonOf(req) : await latestSeason(db);
+    const week = z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(30)
+      .parse(req.query.week || 1);
+    const type = z.enum(['REG', 'POST']).parse(req.query.type || 'REG');
+    const games = await db.query(
+      "SELECT * FROM games WHERE season=$1 AND (CASE WHEN type='REG' THEN 'REG' ELSE 'POST' END)=$2",
+      [season, type],
+    );
+    const teams = await db.query('SELECT * FROM teams ORDER BY name');
+    const teamStats = await db.query(
+      'SELECT * FROM team_weekly WHERE season=$1 AND week=$2 AND type=$3',
+      [season, week, type],
+    );
+    const players = await db.query(
+      'SELECT * FROM player_weekly WHERE season=$1 AND week=$2 AND type=$3 ORDER BY team_id,name',
+      [season, week, type],
+    );
+    out(res, {
+      season,
+      week,
+      type,
+      source: 'https://github.com/nflverse/nflverse-data',
+      teams: teams.map((t) => {
+        const schedule = games.filter((g) => g.home_id === t.id || g.away_id === t.id);
+        const game = scheduleWeeks(schedule, t.id, season).find(
+          (g) => g.week === week && (type === 'REG' ? g.type === 'REG' : g.type !== 'REG'),
+        );
+        return {
+          ...t,
+          game: game || null,
+          status: game?.status || 'unavailable',
+          stats: teamStats.find((w) => w.team_id === t.id)?.stats || null,
+          players: players.filter((p) => p.team_id === t.id),
+        };
+      }),
     });
   });
   app.get('/api/players', async (req, res) => {
@@ -369,16 +443,17 @@ export function createApp(db: Database) {
     const week = req.query.week
       ? z.coerce.number().int().min(1).max(30).parse(req.query.week)
       : null;
+    const phase = z.enum(['ALL', 'REG', 'POST']).parse(req.query.type || 'ALL');
     out(res, {
       season: selected,
       items: await db.query(
-        'SELECT * FROM games WHERE season=$1 AND ($2::integer IS NULL OR week=$2) ORDER BY starts_at LIMIT 32 OFFSET $3',
-        [selected, week, (page - 1) * 32],
+        `SELECT * FROM games WHERE season=$1 AND ($2::integer IS NULL OR week=$2) AND ($4='ALL' OR CASE WHEN type='REG' THEN 'REG' ELSE 'POST' END=$4) ORDER BY starts_at LIMIT 32 OFFSET $3`,
+        [selected, week, (page - 1) * 32, phase],
       ),
       total: count(
         await db.query(
-          'SELECT count(*)::integer count FROM games WHERE season=$1 AND ($2::integer IS NULL OR week=$2)',
-          [selected, week],
+          `SELECT count(*)::integer count FROM games WHERE season=$1 AND ($2::integer IS NULL OR week=$2) AND ($3='ALL' OR CASE WHEN type='REG' THEN 'REG' ELSE 'POST' END=$3)`,
+          [selected, week, phase],
         ),
       ),
     });

@@ -6,6 +6,7 @@ test('public NFL exploration, comparisons, search, and mobile navigation', async
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Setting the standard' })).toBeVisible();
+  await page.getByLabel('Statistics season').selectOption('2024');
   await expect(page.getByText('4,918', { exact: true }).first()).toBeVisible();
   await page.screenshot({ path: 'test-results/dashboard-desktop.png', fullPage: true });
   await page.getByRole('link', { name: 'Players', exact: true }).click();
@@ -68,6 +69,13 @@ test('register, verify, sign in, follow, join, post, comment, poll, and sign out
   await expect(page.getByRole('button', { name: 'Unfollow KC' })).toBeVisible();
   await page.goto('/favorites');
   await expect(page.getByRole('heading', { name: 'Kansas City Chiefs' })).toBeVisible();
+  await page.goto('/communities');
+  await expect(page.getByRole('heading', { name: 'My Favorite Teams' })).toBeVisible();
+  await page.getByText('Add NFL teams', { exact: true }).click();
+  await page.getByRole('button', { name: 'Follow BUF', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Unfollow BUF', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'KC Kansas City Chiefs', exact: true }).click();
+  await expect(page.getByLabel('Team season')).toHaveValue('2026');
   await page.goto('/communities/kc');
   await page.getByRole('button', { name: 'Join community', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Joined · Leave' })).toBeVisible();
@@ -79,7 +87,13 @@ test('register, verify, sign in, follow, join, post, comment, poll, and sign out
   await page.getByRole('button', { name: 'Publish discussion' }).click();
   await page.getByRole('link', { name: 'What makes a great football community?' }).click();
   await page.getByLabel('Add your perspective').fill('Agreed. Context matters.');
+  const refreshedComments = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'GET' &&
+      /\/api\/posts\/[^/]+$/.test(new URL(response.url()).pathname),
+  );
   await page.getByRole('button', { name: 'Post comment' }).click();
+  expect((await refreshedComments).ok()).toBe(true);
   await expect(page.getByText('Agreed. Context matters.', { exact: true })).toBeVisible();
   await page.goto('/communities/kc');
   await page.getByRole('button', { name: 'Create a poll' }).click();
@@ -110,4 +124,37 @@ test('dashboard and account forms have no WCAG A or AA automated violations', as
       result.violations.map((v) => ({ id: v.id, nodes: v.nodes.map((n) => n.target) })),
     ).toEqual([]);
   }
+});
+
+test('weekly schedules and latest team pages support historical selection on mobile', async ({
+  page,
+}) => {
+  await page.goto('/games');
+  await expect(page.getByLabel('Schedule season')).toHaveValue('2026');
+  await expect(
+    page.getByRole('heading', { name: 'Kansas City Chiefs', exact: true }),
+  ).toBeVisible();
+  await page.getByLabel('Schedule week').selectOption('18');
+  await expect(page.getByText('Statistics unavailable.', { exact: true }).first()).toBeVisible();
+  await page.getByLabel('Schedule season').selectOption('2024');
+  await page.getByLabel('Season phase').selectOption('POST');
+  await expect(page.locator('.game-card').first()).toContainText('Postseason');
+  await page.getByLabel('Statistics season').selectOption('2024');
+  await page.goto('/teams/KC');
+  await expect(page.getByLabel('Team season')).toHaveValue('2026');
+  await expect(page.getByText('Full available roster', { exact: true })).toBeVisible();
+  await expect(
+    page.getByText('Season statistics unavailable', { exact: true }).first(),
+  ).toBeVisible();
+  await page.getByLabel('Team season').selectOption('2024');
+  await expect(page.getByText('Partial roster', { exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByLabel('Team season').selectOption('2026');
+  await expect(page.getByText('Full available roster', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.goto('/games');
+  await expect(
+    page.getByRole('heading', { name: 'Kansas City Chiefs', exact: true }),
+  ).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

@@ -6,6 +6,9 @@ Sources:
 
 - Team identities, divisions, conferences, colors: https://github.com/nflverse/nflverse-pbp/blob/master/teams_colors_logos.csv
 - Weekly offensive player statistics: https://github.com/nflverse/nflverse-data/releases/tag/player_stats (`player_stats_2023.csv` and `player_stats_2024.csv`)
+- Current weekly player statistics (offense, defense, special teams): https://github.com/nflverse/nflverse-data/releases/tag/stats_player (`stats_player_week_2026.csv`)
+- Weekly team statistics: https://github.com/nflverse/nflverse-data/releases/tag/stats_team (`stats_team_week_2026.csv`)
+- Full available season roster: https://github.com/nflverse/nflverse-data/releases/tag/rosters (`roster_2026.csv`)
 - Schedules, final scores, stadiums: https://github.com/nflverse/nfldata/blob/master/data/games.csv
 - Provider documentation and terms: https://nflreadr.nflverse.com/ and https://nflverse.nflverse.com/
 
@@ -13,7 +16,7 @@ The app attributes nflverse on statistics pages. nflverse distributes its datase
 
 Processing:
 
-- Statistics include **regular-season** records only. Additive metrics are summed across weeks. Completion percentage is calculated as completions / attempts × 100 and rounded to one decimal.
+- Season totals include **regular-season** records only. The new weekly tables retain REG/POST labels separately, including postseason rows when the provider publishes them. Team season statistics sum the provider’s additive weekly team metrics, independently of player roster affiliation. Additive metrics are summed across weeks. Completion percentage is calculated as completions / attempts × 100 and rounded to one decimal.
 - Each player-season has its own team association, set to the most recent team appearing in that season's source rows. A player's aggregate after a trade covers their entire season; it must not be interpreted as production exclusively for the final team.
 - Team win/loss/tie records are derived from recorded regular-season game scores, not player-stat sums. Missing results remain null, never zero.
 - Historical franchise aliases are mapped to current franchise IDs: OAK → LV, SD → LAC, STL/LAR → LA, JAC → JAX.
@@ -21,4 +24,4 @@ Processing:
 - No odds, spreads, or monetary information is imported. Predictions are winner-only, recreational, and lock at the stored kickoff time.
 - Sources can be corrected later. Refreshes update the same stable records and recompute prediction points instead of incrementing totals repeatedly.
 
-The snapshot is a reproducible initial dataset, not an ongoing data-service guarantee. Player statistics cover 2023 and 2024; included schedule seasons are 2023–2026. The interface deliberately uses empty states when a recorded result, fan discussion, or scored prediction does not exist.
+The snapshot is a reproducible initial dataset, not an ongoing data-service guarantee. Player statistics cover 2023, 2024, and 2026; included schedule seasons are 2023–2026. The latest imported season is 2026: weekly player and team statistics cover weeks 1–8 at retrieval. Later weeks and 2026 postseason statistics are unavailable. 2025 schedules/results are retained, but player/team statistics and rosters for that year are not installed. Historical 2023/2024 weekly player statistics use the legacy player-season team association (traded players may be attributed to their final team); historical full rosters and team statistics are explicitly unavailable. The 2026 roster includes all provider season roster records (including inactive, reserve, and traded players), rather than promising a live 53-player roster. Missing source metrics are omitted, not replaced with invented zeroes. The interface deliberately uses empty states when a recorded result, fan discussion, or scored prediction does not exist.

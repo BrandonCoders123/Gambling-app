@@ -1,10 +1,29 @@
 import 'dotenv/config';
 import { fetch, ProxyAgent } from 'undici';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { parse } from 'csv-parse/sync';
 
 // nflverse publishes open datasets; transport follows the environment's HTTPS proxy.
 const dispatcher = process.env.HTTPS_PROXY ? new ProxyAgent(process.env.HTTPS_PROXY) : undefined;
 async function csv(url: string) {
+  const cached =
+    process.env.NFLVERSE_CACHE_DIR &&
+    path.join(
+      process.env.NFLVERSE_CACHE_DIR,
+      url.endsWith('teams_colors_logos.csv') ? 'teams.csv' : url.split('/').at(-1)!,
+    );
+  if (cached) {
+    try {
+      return parse(await fs.readFile(cached, 'utf8'), {
+        columns: true,
+        skip_empty_lines: true,
+        bom: true,
+      }) as Record<string, string>[];
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    }
+  }
   const response = await fetch(url, { dispatcher, signal: AbortSignal.timeout(90000) });
   if (!response.ok) throw new Error(`nflverse returned HTTP ${response.status} for ${url}`);
   return parse(await response.text(), {
@@ -16,13 +35,19 @@ async function csv(url: string) {
 export async function fetchNFLverse(season: number) {
   if (!Number.isInteger(season) || season < 1999 || season > 2100)
     throw new Error('Supply a valid season');
-  const [teamsRaw, statsRaw, gamesRaw] = await Promise.all([
+  const [teamsRaw, statsRaw, gamesRaw, rosterRaw, teamStatsRaw] = await Promise.all([
     csv('https://raw.githubusercontent.com/nflverse/nflverse-pbp/master/teams_colors_logos.csv'),
     csv(
-      `https://github.com/nflverse/nflverse-data/releases/download/player_stats/player_stats_${season}.csv`,
+      `https://github.com/nflverse/nflverse-data/releases/download/${season <= 2024 ? 'player_stats/player_stats_' : 'stats_player/stats_player_week_'}${season}.csv`,
     ),
     csv('https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv'),
+    csv(`https://github.com/nflverse/nflverse-data/releases/download/rosters/roster_${season}.csv`),
+    csv(
+      `https://github.com/nflverse/nflverse-data/releases/download/stats_team/stats_team_week_${season}.csv`,
+    ),
   ]);
+  if (!teamsRaw.length || !statsRaw.length || !rosterRaw.length || !teamStatsRaw.length)
+    throw new Error('nflverse returned an empty required dataset');
   const aliases: Record<string, string> = {
     OAK: 'LV',
     SD: 'LAC',
@@ -56,10 +81,14 @@ export async function fetchNFLverse(season: number) {
     'receiving_yards',
     'receiving_tds',
   ];
+  for (const r of statsRaw) {
+    r.recent_team ||= r.team;
+    r.interceptions ??= r.passing_interceptions;
+  }
   const playersById = new Map<string, any>();
-  for (const r of statsRaw.filter(
-    (r) => r.season_type === 'REG' && teamIds.has(abbr(r.recent_team)),
-  )) {
+  for (const r of [...statsRaw]
+    .sort((a, b) => Number(a.week) - Number(b.week))
+    .filter((r) => r.season_type === 'REG' && teamIds.has(abbr(r.recent_team)))) {
     let p = playersById.get(r.player_id);
     if (!p) {
       p = {
@@ -77,7 +106,8 @@ export async function fetchNFLverse(season: number) {
     p.stats.games++;
     const week: Record<string, number> = { week: Number(r.week) };
     for (const m of metrics) {
-      const v = Number(r[m] || 0);
+      if (r[m] === '' || r[m] === undefined) continue;
+      const v = Number(r[m]);
       if (!Number.isFinite(v)) throw new Error(`Invalid ${m}`);
       p.stats[m] = (p.stats[m] || 0) + v;
       week[m] = v;
@@ -120,10 +150,61 @@ export async function fetchNFLverse(season: number) {
       parts.find((p) => p.type === 'timeZoneName')!.value.replace('GMT', '') || '+00:00';
     return new Date(`${day}T${time}:00${offset}`).toISOString();
   }
+  const statValues = (r: Record<string, string>) =>
+    Object.fromEntries(
+      [
+        ...metrics,
+        'def_tackles_solo',
+        'def_sacks',
+        'def_interceptions',
+        'fg_made',
+        'fg_att',
+      ].flatMap((m) => {
+        const raw = m === 'interceptions' ? (r.interceptions ?? r.passing_interceptions) : r[m];
+        if (raw === '' || raw === undefined) return [];
+        const value = Number(raw);
+        if (!Number.isFinite(value)) throw new Error(`Invalid ${m}`);
+        return [[m, value]];
+      }),
+    );
+  const weekly = statsRaw
+    .filter((r) => ['REG', 'POST'].includes(r.season_type) && teamIds.has(abbr(r.recent_team)))
+    .map((r) => ({
+      player: r.player_id,
+      name: r.player_display_name || r.player_name,
+      position: r.position,
+      team: abbr(r.recent_team),
+      season: Number(r.season),
+      week: Number(r.week),
+      type: r.season_type,
+      stats: statValues(r),
+    }));
+  const teamWeekly = teamStatsRaw
+    .filter((r) => ['REG', 'POST'].includes(r.season_type) && teamIds.has(abbr(r.team)))
+    .map((r) => ({
+      team: abbr(r.team),
+      season: Number(r.season),
+      week: Number(r.week),
+      type: r.season_type,
+      stats: statValues(r),
+    }));
+  const roster = rosterRaw
+    .filter((r) => teamIds.has(abbr(r.team)))
+    .map((r) => ({
+      id: r.gsis_id || `roster:${r.team}:${r.full_name}`,
+      name: r.full_name,
+      position: r.position,
+      team: abbr(r.team),
+      season: Number(r.season),
+      status: r.status || 'Unavailable',
+    }));
   const snapshot = {
     source: 'https://github.com/nflverse/nflverse-data',
     fetchedAt: new Date().toISOString(),
     teams,
+    roster,
+    weekly,
+    teamWeekly,
     players,
     games,
   };
