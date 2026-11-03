@@ -22,24 +22,24 @@ PGlite is a **single-process development database**: stop the app before running
 
 ## What works
 
-- Email/password registration, one-hour email verification and password-reset links, scrypt password hashing, seven-day server-side sessions, logout, profile editing, account deactivation/deletion.
+- Email/password registration without email verification, one-hour password-reset links, scrypt password hashing, seven-day server-side sessions, logout, profile editing, account deactivation/deletion.
 - NFL team/player profiles, season statistics, weekly charts with table alternatives, search, position/stat filters, paginated player tables, and player/team comparisons.
 - Persistent favorite teams and players, a personalized dashboard, 32 team communities plus NFL Central, memberships, discussions, owner editing, comments, upvotes, and reports.
 - Administrator dashboard, user suspension/roles, community rules, scoped moderator assignment, report resolution/hiding, synchronization history, and audit logs.
-- Friendly winner predictions that lock at kickoff, result-based idempotent scoring, history, leaderboard, and community polls with one changeable vote per account until closing.
+- Friendly winner predictions that lock at kickoff, result-based idempotent scoring, history on the predictions page and your account profile, leaderboard, and community polls with one changeable vote per account until closing.
 - Responsive desktop/mobile layouts, keyboard controls, focus-contained dialogs, and sourced data instead of fabricated scores or statistics.
 
 ## Email and administrator access
 
-In development, emails are written to a private, git-ignored `.data/mailbox.ndjson` file. After registering, read your verification link with:
+In development, emails are written to a private, git-ignored `.data/mailbox.ndjson` file. Registration does not send email or require verification. Sign in immediately with your email and password. Existing unverified accounts can also sign in. After requesting a password reset, read your reset link with:
 
 ```sh
 npm run mail -- you@example.com
 ```
 
-Open that link, verify, then sign in. `npm run mail` is an operator-only development tool; the mailbox is never served through the API. Production requires SMTP.
+Open that link to reset your password, then sign in. `npm run mail` is an operator-only development tool; the mailbox is never served through the API. Production requires SMTP.
 
-To grant the first administrator role, register and verify an account, stop the app if using PGlite, then run:
+To grant the first administrator role, register an account, stop the app if using PGlite, then run:
 
 ```sh
 npm run admin -- you@example.com

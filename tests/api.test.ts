@@ -37,7 +37,6 @@ async function account(name: string) {
     email,
     password: secret,
   }).expect(201);
-  await write(agent, 'post', '/api/auth/verify', { token: await mailToken(email) }).expect(200);
   const r = await write(agent, 'post', '/api/auth/login', { email, password: secret }).expect(200);
   return { id: r.body.data.id, email, agent };
 }
@@ -90,7 +89,7 @@ test('guests, cross-origin requests, and forged form posts cannot write', async 
     .expect(403);
   await alice.agent.get('/api/admin/users').expect(403);
 });
-test('registration requires verification, enforces uniqueness, and uses one-use links', async () => {
+test('registration permits immediate sign-in without verification and enforces uniqueness', async () => {
   const a = request.agent(app),
     email = 'unverified@example.com';
   await write(a, 'post', '/api/auth/register', {
@@ -98,10 +97,29 @@ test('registration requires verification, enforces uniqueness, and uses one-use 
     email,
     password: secret,
   }).expect(201);
-  await write(a, 'post', '/api/auth/login', { email, password: secret }).expect(403);
-  const token = await mailToken(email);
-  await write(a, 'post', '/api/auth/verify', { token }).expect(200);
-  await write(a, 'post', '/api/auth/verify', { token }).expect(400);
+  await write(a, 'post', '/api/auth/login', { email, password: secret }).expect(200);
+  const me = (await a.get('/api/auth/me').expect(200)).body.data;
+  assert.equal(me.email, email);
+  assert.equal(me.verified, false);
+  await a.get('/api/favorites').expect(200);
+  assert.equal(
+    (await db.query("SELECT * FROM auth_tokens WHERE user_id=$1 AND kind='verify'", [me.id]))
+      .length,
+    0,
+  );
+  await write(a, 'post', '/api/auth/resend', { email }).expect(200);
+  assert.equal(
+    (await db.query("SELECT * FROM auth_tokens WHERE user_id=$1 AND kind='verify'", [me.id]))
+      .length,
+    0,
+  );
+  // Accounts already awaiting verification must also be able to sign in and reset passwords.
+  await write(a, 'post', '/api/auth/forgot', { email }).expect(200);
+  const reset = await mailToken(email);
+  await write(a, 'post', '/api/auth/reset', { token: reset, password: secret }).expect(200);
+  await write(a, 'post', '/api/auth/reset', { token: reset, password: secret }).expect(400);
+  await a.get('/api/favorites').expect(401);
+  await write(a, 'post', '/api/auth/login', { email, password: secret }).expect(200);
   await write(a, 'post', '/api/auth/register', {
     username: 'alice2',
     email: 'ALICE@example.com',
@@ -259,12 +277,23 @@ test('predictions reject outsiders and past games, update once, score idempotent
     "UPDATE games SET starts_at=now()-interval '1 minute',home_score=14,away_score=21 WHERE id=$1",
     [id],
   );
+  await request(app).get('/api/predictions/history').expect(401);
+  const own = (await alice.agent.get('/api/predictions/history').expect(200)).body.data;
+  assert.equal(own.length, 1);
+  assert.equal(own[0].game_id, id);
+  assert.equal(own[0].team_id, 'BUF');
+  assert.equal(own[0].points, null);
+  assert.deepEqual((await bob.agent.get('/api/predictions/history').expect(200)).body.data, []);
   for (let i = 0; i < 2; i++) await db.transaction(scorePredictions);
   const [p] = await db.query('SELECT * FROM predictions WHERE user_id=$1 AND game_id=$2', [
     alice.id,
     id,
   ]);
   assert.equal(p.points, 1);
+  assert.equal(
+    (await alice.agent.get('/api/predictions/history').expect(200)).body.data[0].points,
+    1,
+  );
   const r = await request(app).get('/api/predictions/leaderboard').expect(200);
   assert.equal(r.body.data[0].points, 1);
   assert.equal(r.body.data[0].played, 1);

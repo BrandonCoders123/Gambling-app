@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Link, useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import {
   ArrowUpRight,
-  Mail,
   Eye,
   EyeOff,
   Shield,
@@ -19,6 +18,7 @@ import {
 } from 'lucide-react';
 import { api, useApp, useResource, Load, Modal, date, num } from './lib';
 import { Heading, SignInPrompt } from './sports';
+import { PredictionHistory } from './social';
 export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' | 'reset' }) {
   const { reloadUser, notify } = useApp();
   const navigate = useNavigate();
@@ -88,9 +88,6 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' | 're
           <div className="auth-success" role="status">
             <CheckCircle2 size={32} />
             <h3>{success}</h3>
-            {mode === 'register' && (
-              <p>Verify your email before signing in. Your link is valid for one hour.</p>
-            )}
             <Link className="btn dark" to="/login" onClick={() => setSuccess('')}>
               Go to sign in
             </Link>
@@ -198,26 +195,6 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' | 're
                       : 'Update password'}
               <ArrowUpRight size={17} />
             </button>
-            {mode === 'login' && (
-              <button
-                type="button"
-                className="resend-link"
-                onClick={async () => {
-                  try {
-                    if (!email) {
-                      setError('Enter your email address first.');
-                      return;
-                    }
-                    const r = await api('/auth/resend', 'POST', { email });
-                    notify(r.message);
-                  } catch (e) {
-                    setError((e as Error).message);
-                  }
-                }}
-              >
-                Need another verification email?
-              </button>
-            )}
           </form>
         )}
         <p className="auth-switch">
@@ -258,58 +235,20 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' | 're
   );
 }
 export function VerifyPage() {
-  const [params] = useSearchParams();
-  const [status, setStatus] = useState(''),
-    [error, setError] = useState(''),
-    [busy, setBusy] = useState(false);
   return (
-    <div className="panel verification">
-      <Mail size={40} />
-      <h1>One step closer to the arena.</h1>
-      <p>Verify your email address to activate your account.</p>
-      {status ? (
-        <>
-          <p className="success-message" role="status">
-            {status}
-          </p>
-          <Link to="/login" className="btn dark">
-            Sign in
-          </Link>
-        </>
-      ) : (
-        <button
-          className="btn dark"
-          disabled={busy || !params.get('token')}
-          onClick={async () => {
-            setBusy(true);
-            try {
-              const r = await api('/auth/verify', 'POST', { token: params.get('token') });
-              setStatus(r.message);
-            } catch (e) {
-              setError((e as Error).message);
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {busy ? 'Verifying…' : 'Verify my email'}
-          <CheckCircle2 size={16} />
-        </button>
-      )}
-      {error && (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
-      )}
-      {!params.get('token') && (
-        <p className="form-error">Open the verification link in your email.</p>
-      )}
-    </div>
+    <section className="panel verification">
+      <h1>Your account is ready.</h1>
+      <p>Email verification is no longer required. Sign in with your email and password.</p>
+      <Link to="/login" className="btn dark">
+        Sign in
+      </Link>
+    </section>
   );
 }
 export function Profile() {
   const { user, reloadUser, notify } = useApp();
   const navigate = useNavigate();
+  const predictions = useResource<any[]>(user ? '/predictions/history' : null);
   const [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
     [action, setAction] = useState<'delete' | 'deactivate' | null>(null);
@@ -411,6 +350,18 @@ export function Profile() {
           </section>
         </aside>
       </div>
+      <section aria-labelledby="my-predictions" className="spaced">
+        <div className="section-heading">
+          <h2 id="my-predictions">My Predictions</h2>
+          <Link className="btn outline" to="/predictions">
+            Make a prediction
+          </Link>
+        </div>
+        <p className="muted">
+          Your saved NFL picks and results. Updates to your picks appear here.
+        </p>
+        <PredictionHistory {...predictions} />
+      </section>
       {action && (
         <Modal
           title={

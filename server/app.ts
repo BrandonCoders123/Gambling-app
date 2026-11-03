@@ -93,7 +93,7 @@ export function createApp(db: Database) {
     const session = req.cookies.sa_session;
     if (typeof session === 'string') {
       const [user] = await db.query(
-        "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now() AND u.status='active' AND u.verified_at IS NOT NULL",
+        "SELECT u.* FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now() AND u.status='active'",
         [digest(session)],
       );
       req.user = user;
@@ -130,8 +130,7 @@ export function createApp(db: Database) {
       user.email,
       await hashPassword(body.password),
     ]);
-    await sendToken(db, user, 'verify');
-    out(res, { message: 'Check your email to verify your account.' }, 201);
+    out(res, { message: 'Your account is ready. You can sign in now.' }, 201);
   });
   app.post('/api/auth/verify', async (req, res) => {
     const { token: secret } = z.object({ token: z.string().length(64) }).parse(req.body);
@@ -146,10 +145,8 @@ export function createApp(db: Database) {
     out(res, { message: 'Email verified. You can now sign in.' });
   });
   app.post('/api/auth/resend', async (req, res) => {
-    const body = z.object({ email }).parse(req.body);
-    const [u] = await db.query('SELECT * FROM users WHERE email=$1', [body.email]);
-    if (u && !u.verified_at && u.status === 'active') await sendToken(db, u, 'verify');
-    out(res, { message: 'If the account needs verification, an email is on its way.' });
+    z.object({ email }).parse(req.body);
+    out(res, { message: 'Email verification is not required. You can sign in now.' });
   });
   app.post('/api/auth/login', async (req, res) => {
     const body = z.object({ email, password: z.string().min(1).max(128) }).parse(req.body);
@@ -160,7 +157,6 @@ export function createApp(db: Database) {
       u?.password_hash || 'scrypt:00000000000000000000000000000000:' + '0'.repeat(128),
     );
     if (!u || !valid || u.status !== 'active') fail(401, 'Email or password is incorrect.');
-    if (!u.verified_at) fail(403, 'Verify your email before signing in.');
     const secret = token();
     await db.transaction(async (q) => {
       await q('DELETE FROM sessions WHERE expires_at<now()');
@@ -191,10 +187,9 @@ export function createApp(db: Database) {
   app.get('/api/auth/me', (req, res) => out(res, req.user ? safeUser(req.user) : null));
   app.post('/api/auth/forgot', async (req, res) => {
     const body = z.object({ email }).parse(req.body);
-    const [u] = await db.query(
-      "SELECT * FROM users WHERE email=$1 AND verified_at IS NOT NULL AND status='active'",
-      [body.email],
-    );
+    const [u] = await db.query("SELECT * FROM users WHERE email=$1 AND status='active'", [
+      body.email,
+    ]);
     if (u) await sendToken(db, u, 'reset');
     out(res, { message: 'If the account exists, a reset link is on its way.' });
   });

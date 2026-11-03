@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test';
-import fs from 'node:fs/promises';
 import AxeBuilder from '@axe-core/playwright';
 test('public NFL exploration, comparisons, search, and mobile navigation', async ({ page }) => {
   const errors: string[] = [];
@@ -36,7 +35,7 @@ test('public NFL exploration, comparisons, search, and mobile navigation', async
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(errors).toEqual([]);
 });
-test('register, verify, sign in, follow, join, post, comment, poll, and sign out', async ({
+test('register without email verification, sign in, follow, socialize, predict, and sign out', async ({
   page,
 }) => {
   const name = 'fan_' + Date.now(),
@@ -48,17 +47,9 @@ test('register, verify, sign in, follow, join, post, comment, poll, and sign out
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Create your account' }).click();
   await expect(
-    page.getByRole('heading', { name: 'Check your email to verify your account.' }),
+    page.getByRole('heading', { name: 'Your account is ready. You can sign in now.' }),
   ).toBeVisible();
-  const messages = (await fs.readFile(process.env.E2E_DATA_DIR + '/mailbox.ndjson', 'utf8'))
-    .trim()
-    .split('\n')
-    .map((l) => JSON.parse(l));
-  const mail = messages.filter((m) => m.to === email).at(-1);
-  const link = mail.text.split('\n').find((s: string) => s.startsWith('http'));
-  await page.goto(link);
-  await page.getByRole('button', { name: 'Verify my email' }).click();
-  await expect(page.getByRole('status')).toContainText('Email verified.');
+  await expect(page.getByText('Need another verification email?')).toHaveCount(0);
   await page.goto('/login');
   await page.getByLabel('Email address', { exact: true }).fill(email);
   await page.getByLabel('Password', { exact: true }).fill(password);
@@ -103,14 +94,39 @@ test('register, verify, sign in, follow, join, post, comment, poll, and sign out
   await page.getByRole('button', { name: 'Create poll', exact: true }).click();
   await page.getByRole('button', { name: 'Offense 0%' }).click();
   await expect(page.getByRole('button', { name: 'Offense 100%' })).toBeVisible();
-  await page.goto('/profile');
+  await page.goto('/predictions');
+  const firstCard = page.locator('.prediction-card').first();
+  await expect(firstCard).toBeVisible();
+  const pick = (await firstCard.locator('.prediction-picks button').first().innerText()).trim();
+  const matchup = await firstCard.locator('.game-card').getAttribute('href');
+  await firstCard.locator('.prediction-picks button').first().click();
+  await expect(page.getByRole('status').filter({ hasText: 'Your pick is saved.' })).toBeVisible();
+  await page.getByRole('link', { name: 'My profile & predictions' }).click();
+  await expect(page.getByRole('heading', { name: 'My Predictions', exact: true })).toBeVisible();
+  const predictionRow = page.locator('tr').filter({ has: page.locator(`a[href="${matchup}"]`) });
+  await expect(predictionRow).toContainText(pick);
+  await expect(predictionRow).toContainText('Pending');
+  await page.reload();
+  await expect(predictionRow).toContainText(pick);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.getByLabel('Biography').fill('Football, data, and good conversation.');
   await page.getByRole('button', { name: 'Save profile' }).click();
-  await expect(page.getByRole('status')).toContainText('Your profile is updated.');
+  await expect(
+    page.getByRole('status').filter({ hasText: 'Your profile is updated.' }),
+  ).toBeVisible();
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(
     page.getByRole('banner').getByRole('link', { name: 'Sign in', exact: true }),
   ).toBeVisible();
+  await page.goto('/login');
+  await page.getByLabel('Email address', { exact: true }).fill(email);
+  await page.getByLabel('Password', { exact: true }).fill(password);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Welcome back, ' + name + '.' })).toBeVisible();
+  await page.goto('/profile');
+  await expect(predictionRow).toContainText(pick);
 });
 test('dashboard and account forms have no WCAG A or AA automated violations', async ({ page }) => {
   for (const route of ['/', '/register']) {

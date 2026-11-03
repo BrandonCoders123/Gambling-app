@@ -742,10 +742,17 @@ export function Predictions() {
         title="You know the game. Call it."
         description="Friendly predictions. One point per correct winner. Picks lock at kickoff."
         action={
-          <Link to="/leaderboard" className="btn outline">
-            <Trophy size={16} />
-            Leaderboard
-          </Link>
+          <div className="button-row">
+            {user && (
+              <Link to="/profile" className="btn outline">
+                My profile & predictions
+              </Link>
+            )}
+            <Link to="/leaderboard" className="btn outline">
+              <Trophy size={16} />
+              Leaderboard
+            </Link>
+          </div>
         }
       />
       <div className="prediction-notice">
@@ -801,51 +808,7 @@ export function Predictions() {
             )}
           </>
         ) : user ? (
-          <Load {...history}>
-            <div className="panel">
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>MATCHUP</th>
-                      <th>YOUR PICK</th>
-                      <th>DATE</th>
-                      <th>RESULT</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {history.data?.map((g) => (
-                      <tr key={g.game_id}>
-                        <td>
-                          <Link to={'/games/' + g.game_id}>
-                            {g.away_id} at {g.home_id}
-                          </Link>
-                        </td>
-                        <td className="emphasized">{g.team_id}</td>
-                        <td>{date(g.starts_at)}</td>
-                        <td>
-                          <span className="tag">
-                            {g.points === null
-                              ? 'Pending'
-                              : g.points === 1
-                                ? 'Correct · +1'
-                                : 'Incorrect · 0'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {!history.data?.length && (
-                <div className="empty">
-                  <Target />
-                  <h3>No picks yet.</h3>
-                  <p>Choose an upcoming game to get started.</p>
-                </div>
-              )}
-            </div>
-          </Load>
+          <PredictionHistory {...history} />
         ) : (
           <SignInPrompt />
         )}
@@ -910,5 +873,63 @@ export function Leaderboard() {
         </section>
       </Load>
     </>
+  );
+}
+
+export function PredictionHistory({
+  data,
+  loading,
+  error,
+}: {
+  data: any[] | null;
+  loading: boolean;
+  error: string;
+}) {
+  return (
+    <Load loading={loading} error={error}>
+      <div className="panel">
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>MATCHUP</th>
+                <th>YOUR PICK</th>
+                <th>DATE</th>
+                <th>RESULT</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data?.map((g) => (
+                <tr key={g.game_id}>
+                  <td>
+                    <Link to={'/games/' + g.game_id}>
+                      {g.away_id} at {g.home_id}
+                    </Link>
+                  </td>
+                  <td className="emphasized">{g.team_id}</td>
+                  <td>{date(g.starts_at)}</td>
+                  <td>
+                    <span className="tag">
+                      {g.points === null
+                        ? 'Pending'
+                        : g.points === 1
+                          ? 'Correct · +1'
+                          : 'Incorrect · 0'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {!data?.length && (
+          <div className="empty">
+            <Target />
+            <h3>No picks yet.</h3>
+            <p>Choose an upcoming game to get started.</p>
+          </div>
+        )}
+      </div>
+    </Load>
   );
 }
