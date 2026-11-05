@@ -6,9 +6,18 @@ import cookieParser from 'cookie-parser';
 import { z, ZodError } from 'zod';
 import { randomUUID } from 'node:crypto';
 import type { Database, Query } from './db.js';
-import { audit, digest, hashPassword, safeUser, sendToken, token, verifyPassword } from './auth.js';
+import {
+  audit,
+  createSession,
+  digest,
+  hashPassword,
+  safeUser,
+  sendToken,
+  verifyPassword,
+} from './auth.js';
 import { importSnapshot } from './data.js';
 import fs from 'node:fs/promises';
+import { googleAuth } from './google.js';
 import { startNFLverseSync } from './sync.js';
 
 declare global {
@@ -110,6 +119,7 @@ export function createApp(db: Database) {
     await db.query('SELECT 1');
     out(res, { status: 'ok', database: 'PostgreSQL', dataMode: 'sourced snapshot' });
   });
+  app.use('/api/auth/google', googleAuth(db));
   app.post('/api/auth/register', async (req, res) => {
     const body = z
       .object({
@@ -157,25 +167,7 @@ export function createApp(db: Database) {
       u?.password_hash || 'scrypt:00000000000000000000000000000000:' + '0'.repeat(128),
     );
     if (!u || !valid || u.status !== 'active') fail(401, 'Email or password is incorrect.');
-    const secret = token();
-    await db.transaction(async (q) => {
-      await q('DELETE FROM sessions WHERE expires_at<now()');
-      await q(
-        "INSERT INTO sessions(token_hash,user_id,expires_at) VALUES($1,$2,now()+interval '7 days')",
-        [digest(secret), u.id],
-      );
-      await q("INSERT INTO activity_events(id,user_id,kind) VALUES($1,$2,'login')", [
-        randomUUID(),
-        u.id,
-      ]);
-    });
-    res.cookie('sa_session', secret, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 7 * 86400000,
-      path: '/',
-    });
+    await createSession(db, req, res, u.id);
     out(res, safeUser(u));
   });
   app.post('/api/auth/logout', async (req, res) => {

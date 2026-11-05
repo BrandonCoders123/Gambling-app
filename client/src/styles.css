@@ -4207,3 +4207,12 @@ summary {
   cursor: pointer;
   font-weight: 600;
 }
+
+.google-signin {
+  margin: 1.5rem 0;
+  text-align: center;
+}
+.google-signin p {
+  margin: 1rem 0;
+  font-size: 0.875rem;
+}

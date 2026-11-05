@@ -99,3 +99,10 @@ CREATE TABLE IF NOT EXISTS team_weekly (
  PRIMARY KEY(team_id,season,week,type)
 );
 INSERT INTO schema_versions(version) VALUES (2) ON CONFLICT DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS google_identities (
+ subject text PRIMARY KEY, user_id uuid NOT NULL UNIQUE REFERENCES users ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS google_oauth_states (
+ state_hash text PRIMARY KEY, verifier text NOT NULL, expires_at timestamptz NOT NULL
+);

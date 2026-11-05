@@ -106,3 +106,14 @@ Before public launch, complete deployment-specific privacy/legal contact informa
 - `tests`: isolated API tests and browser journeys
 
 Each cloud task already has an isolated checkout. Reuse it; do not create a worktree unless explicitly requested.
+
+### Google sign-in
+
+Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` as server environment variables (or in the ignored local `.env`). In Google Cloud Console, use an OAuth **Web application** client and add the exact redirect URI:
+
+- Local: `http://localhost:3000/api/auth/google/callback`
+- Production: `https://YOUR_DOMAIN/api/auth/google/callback` (matching `APP_URL`)
+
+Configure the consent screen and add test users if the OAuth app is in testing. The sign-in and registration pages show “Continue with Google” when both credentials are configured. New users get a verified account and can change their generated username in Profile. Existing verified Gmail/Workspace accounts can sign in with Google using their matching address; other existing accounts must use their password. Suspended and deactivated accounts cannot sign in. Google access tokens are discarded after fetching the profile.
+
+Google-created accounts can use **Reset password** in their profile to set a password for password sign-in and account deletion/deactivation. Keep the client secret out of Git and browser environment variables.

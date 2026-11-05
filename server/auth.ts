@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import nodemailer from 'nodemailer';
+import type { Request, Response } from 'express';
 import type { Database, Query } from './db.js';
 const scrypt = promisify(rawScrypt);
 export const digest = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -75,4 +76,28 @@ export async function audit(q: Query, actor: string, action: string, target: str
     action,
     target,
   ]);
+}
+
+export async function createSession(db: Database, req: Request, res: Response, userId: string) {
+  const secret = token();
+  await db.transaction(async (q) => {
+    await q('DELETE FROM sessions WHERE expires_at<now()');
+    if (typeof req.cookies.sa_session === 'string')
+      await q('DELETE FROM sessions WHERE token_hash=$1', [digest(req.cookies.sa_session)]);
+    await q(
+      "INSERT INTO sessions(token_hash,user_id,expires_at) VALUES($1,$2,now()+interval '7 days')",
+      [digest(secret), userId],
+    );
+    await q("INSERT INTO activity_events(id,user_id,kind) VALUES($1,$2,'login')", [
+      randomUUID(),
+      userId,
+    ]);
+  });
+  res.cookie('sa_session', secret, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 7 * 86400000,
+    path: '/',
+  });
 }

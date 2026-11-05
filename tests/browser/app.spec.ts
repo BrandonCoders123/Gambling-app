@@ -174,3 +174,29 @@ test('weekly schedules and latest team pages support historical selection on mob
   ).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test('Google sign-in is available on login and registration and explains cancelled sign-in', async ({
+  page,
+}) => {
+  await page.route('**/api/auth/google/config', (route) =>
+    route.fulfill({ json: { data: { enabled: true } } }),
+  );
+  for (const route of ['/login', '/register']) {
+    await page.goto(route);
+    const google = page.getByRole('link', { name: 'Continue with Google' });
+    await expect(google).toBeVisible();
+    await expect(google).toHaveAttribute('href', '/api/auth/google');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(google).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+  }
+  await page.goto('/login?google_error=cancelled');
+  await expect(page.getByRole('alert')).toContainText('Google sign-in was cancelled');
+  await page.route('**/api/auth/google/config', (route) =>
+    route.fulfill({ json: { data: { enabled: false } } }),
+  );
+  await page.goto('/login');
+  await expect(page.getByRole('link', { name: 'Continue with Google' })).toHaveCount(0);
+});
