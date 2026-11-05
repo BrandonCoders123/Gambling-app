@@ -34,7 +34,15 @@ import {
   SearchPage,
 } from './sports';
 import { Communities, Community, Discussion, Predictions, Leaderboard } from './social';
-import { AuthPage, VerifyPage, Profile, PublicProfile, Admin, Privacy } from './account';
+import {
+  AuthPage,
+  VerifyPage,
+  Profile,
+  PublicProfile,
+  Admin,
+  Privacy,
+  Onboarding,
+} from './account';
 const links = [
   {
     section: 'EXPLORE',
@@ -91,6 +99,7 @@ export default function App() {
   };
   return (
     <div className="app">
+      <Onboarding />
       <a className="skip-link" href="#main">
         Skip to content
       </a>

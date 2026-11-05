@@ -32,6 +32,8 @@ export const safeUser = (u: any) => ({
   bio: u.bio,
   role: u.role,
   verified: !!u.verified_at,
+  hasPassword: !!u.password_hash,
+  onboardingComplete: !!u.onboarding_completed_at,
   created_at: u.created_at,
 });
 export async function sendToken(db: Database, user: any, kind: 'verify' | 'reset') {

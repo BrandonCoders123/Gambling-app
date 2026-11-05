@@ -22,7 +22,8 @@ PGlite is a **single-process development database**: stop the app before running
 
 ## What works
 
-- Email/password registration, one-hour email verification and password-reset links, scrypt password hashing, seven-day server-side sessions, logout, profile editing, account deactivation/deletion.
+- Email/password registration plus optional Google sign-in, one-hour email verification and password-reset links, scrypt password hashing, seven-day server-side sessions, logout, profile editing, account deactivation/deletion.
+- A five-step first-run introduction for newly created accounts. Existing accounts are marked complete during migration and never see it.
 - NFL team/player profiles, season statistics, weekly charts with table alternatives, search, position/stat filters, paginated player tables, and player/team comparisons.
 - Persistent favorite teams and players, a personalized dashboard, 32 team communities plus NFL Central, memberships, discussions, owner editing, comments, upvotes, and reports.
 - Administrator dashboard, user suspension/roles, community rules, scoped moderator assignment, report resolution/hiding, synchronization history, and audit logs.
@@ -84,10 +85,15 @@ The deployment command is `npm run build`, followed by `npm start` from the repo
 | `DATABASE_URL`                         | Managed PostgreSQL connection string; use provider-supported TLS options |
 | `SMTP_URL`                             | SMTP transport URL for real verification/reset email delivery            |
 | `MAIL_FROM`                            | Authorized sender address                                                |
+| `GOOGLE_CLIENT_ID`                     | Google OAuth web client ID; enables the Google sign-in button            |
+| `GOOGLE_CLIENT_SECRET`                 | Google OAuth client secret; server-side token exchange only              |
 | `PORT`                                 | Platform-provided listening port (default 3000)                          |
 | `SYNC_INTERVAL_MINUTES`, `SYNC_SEASON` | Optional provider synchronization schedule                               |
 
 The production entrypoint refuses to start without HTTPS origin, managed PostgreSQL, and SMTP settings. Put credentials in platform secrets, never in source control. Allow outbound access to the database/SMTP transport and nflverse's GitHub/raw/release asset hosts. A proxy placeholder intended for HTTPS APIs is not a raw database password or SMTP credential.
+
+For Google sign-in, create a Web application OAuth client and register exactly
+`https://your-domain/api/auth/google/callback` as an authorized redirect URI (using the same origin as `APP_URL`). Put both Google variables in the deployment's secret/environment settings. The client secret is never sent to the browser or written to the application database. Google is used only to authenticate identity; StatArena continues to store users and app data in its existing PostgreSQL/PGlite database and does not create or use a Google database.
 
 The server trusts one reverse-proxy hop. Deploy behind exactly one trusted HTTPS proxy, or adjust this to your actual infrastructure. Rate limits are per process: use a shared limiter store before scaling across replicas. Managed PostgreSQL must have backups and a tested restore procedure. Use a dedicated least-privilege database user. The SQL schema is versioned and applied transactionally at startup; future breaking schema changes need explicit migrations.
 

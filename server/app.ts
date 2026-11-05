@@ -3,7 +3,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
 import { z, ZodError } from 'zod';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { Database, Query } from './db.js';
 import { audit, digest, hashPassword, safeUser, sendToken, token, verifyPassword } from './auth.js';
 import { importSnapshot } from './data.js';
@@ -45,8 +45,55 @@ const seasonOf = (req: Request) =>
     .max(2100)
     .parse(req.query.season || 2024);
 const count = (rows: any[]) => rows[0]?.count || 0;
-export function createApp(db: Database) {
+type AppOptions = { oauthFetch?: typeof fetch };
+const googleCookie = (secure: boolean) => ({
+  httpOnly: true,
+  sameSite: 'lax' as const,
+  secure,
+  maxAge: 10 * 60000,
+  path: '/api/auth/google',
+});
+const sessionCookie = () => ({
+  httpOnly: true,
+  sameSite: 'lax' as const,
+  secure: process.env.NODE_ENV === 'production',
+  maxAge: 7 * 86400000,
+  path: '/',
+});
+const base64urlSha256 = (value: string) => createHash('sha256').update(value).digest('base64url');
+async function uniqueUsername(q: Query, displayName: string | undefined, address: string) {
+  let base = (displayName || address.split('@')[0] || 'fan')
+    .normalize('NFKD')
+    .replace(/[^a-zA-Z0-9_]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 30);
+  if (base.length < 3) base = `fan_${base || 'user'}`.slice(0, 30);
+  for (let i = 0; i < 100; i++) {
+    const suffix = i ? `_${i}` : '';
+    const candidate = base.slice(0, 30 - suffix.length) + suffix;
+    const [taken] = await q('SELECT 1 FROM users WHERE lower(username)=lower($1)', [candidate]);
+    if (!taken) return candidate;
+  }
+  return `fan_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+}
+async function issueSession(db: Database, userId: string, res: Response) {
+  const secret = token();
+  await db.transaction(async (q) => {
+    await q('DELETE FROM sessions WHERE expires_at<now()');
+    await q(
+      "INSERT INTO sessions(token_hash,user_id,expires_at) VALUES($1,$2,now()+interval '7 days')",
+      [digest(secret), userId],
+    );
+    await q("INSERT INTO activity_events(id,user_id,kind) VALUES($1,$2,'login')", [
+      randomUUID(),
+      userId,
+    ]);
+  });
+  res.cookie('sa_session', secret, sessionCookie());
+}
+export function createApp(db: Database, options: AppOptions = {}) {
   const app = express();
+  const oauthFetch = options.oauthFetch || globalThis.fetch;
   app.disable('x-powered-by');
   app.set('trust proxy', 1);
   app.use(
@@ -160,26 +207,120 @@ export function createApp(db: Database) {
     );
     if (!u || !valid || u.status !== 'active') fail(401, 'Email or password is incorrect.');
     if (!u.verified_at) fail(403, 'Verify your email before signing in.');
-    const secret = token();
-    await db.transaction(async (q) => {
-      await q('DELETE FROM sessions WHERE expires_at<now()');
-      await q(
-        "INSERT INTO sessions(token_hash,user_id,expires_at) VALUES($1,$2,now()+interval '7 days')",
-        [digest(secret), u.id],
-      );
-      await q("INSERT INTO activity_events(id,user_id,kind) VALUES($1,$2,'login')", [
-        randomUUID(),
-        u.id,
-      ]);
-    });
-    res.cookie('sa_session', secret, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 7 * 86400000,
-      path: '/',
-    });
+    await issueSession(db, u.id, res);
     out(res, safeUser(u));
+  });
+  app.get('/api/auth/google/start', (req, res, next) => {
+    try {
+      const clientId = process.env.GOOGLE_CLIENT_ID;
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+      if (!clientId || !clientSecret)
+        fail(503, 'Google sign-in is not configured on this deployment.');
+      const appUrl = new URL(process.env.APP_URL || `${req.protocol}://${req.get('host')}`).origin;
+      const state = randomBytes(32).toString('base64url');
+      const verifier = randomBytes(48).toString('base64url');
+      const secure = process.env.NODE_ENV === 'production';
+      res.cookie('sa_google_state', state, googleCookie(secure));
+      res.cookie('sa_google_verifier', verifier, googleCookie(secure));
+      const authorize = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+      authorize.search = new URLSearchParams({
+        client_id: clientId!,
+        redirect_uri: `${appUrl}/api/auth/google/callback`,
+        response_type: 'code',
+        scope: 'openid email profile',
+        state,
+        code_challenge: base64urlSha256(verifier),
+        code_challenge_method: 'S256',
+        prompt: 'select_account',
+      }).toString();
+      res.redirect(authorize.toString());
+    } catch (error) {
+      next(error);
+    }
+  });
+  app.get('/api/auth/google/callback', async (req, res) => {
+    const cookieOptions = googleCookie(process.env.NODE_ENV === 'production');
+    const failRedirect = () => {
+      res.clearCookie('sa_google_state', cookieOptions);
+      res.clearCookie('sa_google_verifier', cookieOptions);
+      res.redirect(
+        '/login?google_error=' +
+          encodeURIComponent('Google sign-in could not be completed. Please try again.'),
+      );
+    };
+    try {
+      const clientId = process.env.GOOGLE_CLIENT_ID;
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+      if (!clientId || !clientSecret) throw new Error('Google OAuth is not configured');
+      const state = z.string().min(20).parse(req.query.state);
+      const code = z.string().min(1).max(4096).parse(req.query.code);
+      const expectedState = z.string().min(20).parse(req.cookies.sa_google_state);
+      const verifier = z.string().min(20).parse(req.cookies.sa_google_verifier);
+      if (digest(state) !== digest(expectedState)) throw new Error('OAuth state mismatch');
+      const appUrl = new URL(process.env.APP_URL || `${req.protocol}://${req.get('host')}`).origin;
+      const tokenResponse = await oauthFetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code,
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: `${appUrl}/api/auth/google/callback`,
+          grant_type: 'authorization_code',
+          code_verifier: verifier,
+        }),
+      });
+      if (!tokenResponse.ok)
+        throw new Error(`Google token exchange failed: ${tokenResponse.status}`);
+      const tokens = z
+        .object({ access_token: z.string().min(1), token_type: z.string().optional() })
+        .parse(await tokenResponse.json());
+      const profileResponse = await oauthFetch('https://openidconnect.googleapis.com/v1/userinfo', {
+        headers: { Authorization: `Bearer ${tokens.access_token}` },
+      });
+      if (!profileResponse.ok)
+        throw new Error(`Google profile request failed: ${profileResponse.status}`);
+      const profile = z
+        .object({
+          sub: z.string().min(1).max(255),
+          email,
+          email_verified: z.boolean(),
+          name: z.string().max(200).optional(),
+        })
+        .parse(await profileResponse.json());
+      if (!profile.email_verified) throw new Error('Google email is not verified');
+      let user = await db.transaction(async (q) => {
+        let [existing] = await q('SELECT * FROM users WHERE google_subject=$1', [profile.sub]);
+        if (!existing) {
+          [existing] = await q('SELECT * FROM users WHERE lower(email)=lower($1)', [profile.email]);
+          if (existing) {
+            if (existing.google_subject && existing.google_subject !== profile.sub)
+              throw new Error('Email is linked to another Google account');
+            [existing] = await q(
+              'UPDATE users SET google_subject=$2,verified_at=coalesce(verified_at,now()),updated_at=now() WHERE id=$1 RETURNING *',
+              [existing.id, profile.sub],
+            );
+          } else {
+            const username = await uniqueUsername(q, profile.name, profile.email);
+            [existing] = await q(
+              'INSERT INTO users(id,username,email,password_hash,google_subject,verified_at) VALUES($1,$2,$3,NULL,$4,now()) RETURNING *',
+              [randomUUID(), username, profile.email, profile.sub],
+            );
+          }
+        }
+        return existing;
+      });
+      if (!user || user.status !== 'active') throw new Error('Account is not active');
+      await issueSession(db, user.id, res);
+      res.clearCookie('sa_google_state', cookieOptions);
+      res.clearCookie('sa_google_verifier', cookieOptions);
+      res.redirect('/');
+    } catch (error: any) {
+      console.error(
+        JSON.stringify({ level: 'error', event: 'google-oauth', message: error.message }),
+      );
+      failRedirect();
+    }
   });
   app.post('/api/auth/logout', async (req, res) => {
     if (req.cookies.sa_session)
@@ -188,6 +329,13 @@ export function createApp(db: Database) {
     out(res, { ok: true });
   });
   app.get('/api/auth/me', (req, res) => out(res, req.user ? safeUser(req.user) : null));
+  app.post('/api/onboarding/complete', auth, async (req, res) => {
+    const [u] = await db.query(
+      'UPDATE users SET onboarding_completed_at=coalesce(onboarding_completed_at,now()),updated_at=now() WHERE id=$1 RETURNING *',
+      [req.user.id],
+    );
+    out(res, safeUser(u));
+  });
   app.post('/api/auth/forgot', async (req, res) => {
     const body = z.object({ email }).parse(req.body);
     const [u] = await db.query(
@@ -239,9 +387,17 @@ export function createApp(db: Database) {
   });
   app.post('/api/account/:action', auth, async (req, res) => {
     const action = z.enum(['delete', 'deactivate']).parse(req.params.action);
-    const b = z.object({ password: z.string().max(128) }).parse(req.body);
-    if (!(await verifyPassword(b.password, req.user.password_hash)))
-      fail(403, 'Password is incorrect.');
+    const b = z
+      .object({
+        password: z.string().max(128).optional(),
+        confirmation: z.string().max(20).optional(),
+      })
+      .parse(req.body);
+    if (req.user.password_hash) {
+      if (!(await verifyPassword(b.password || '', req.user.password_hash)))
+        fail(403, 'Password is incorrect.');
+    } else if (b.confirmation !== action.toUpperCase())
+      fail(403, `Type ${action.toUpperCase()} to confirm.`);
     await db.transaction(async (q) => {
       if (action === 'delete') await q('DELETE FROM users WHERE id=$1', [req.user.id]);
       else {
@@ -259,6 +415,7 @@ export function createApp(db: Database) {
   app.get('/api/meta', async (_req, res) =>
     out(res, {
       league: 'NFL',
+      googleAuthEnabled: !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
       communityCount: count(await db.query('SELECT count(*)::integer count FROM communities')),
       seasons: (
         await db.query('SELECT DISTINCT season FROM player_seasons ORDER BY season DESC')
