@@ -16,14 +16,19 @@ import {
   Trash2,
   UserRound,
   Activity,
+  ArrowLeft,
+  ArrowRight,
+  Star,
+  Target,
+  GitCompareArrows,
 } from 'lucide-react';
 import { api, useApp, useResource, Load, Modal, date, num } from './lib';
 import { Heading, SignInPrompt } from './sports';
 export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' | 'reset' }) {
-  const { reloadUser, notify } = useApp();
+  const { reloadUser, notify, meta } = useApp();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const [error, setError] = useState(''),
+  const [error, setError] = useState(params.get('google_error') || ''),
     [success, setSuccess] = useState(''),
     [email, setEmail] = useState(''),
     [busy, setBusy] = useState(false),
@@ -84,6 +89,19 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' | 'forgot' | 're
                 ? 'We’ll send a link to reset your password.'
                 : 'Choose a strong password for your account.'}
         </p>
+        {(mode === 'login' || mode === 'register') && meta?.googleAuthEnabled && (
+          <>
+            <a className="google-auth-button" href="/api/auth/google/start">
+              <span className="google-mark" aria-hidden="true">
+                G
+              </span>
+              Continue with Google
+            </a>
+            <div className="auth-divider">
+              <span>or use email</span>
+            </div>
+          </>
+        )}
         {success ? (
           <div className="auth-success" role="status">
             <CheckCircle2 size={32} />
@@ -389,9 +407,13 @@ export function Profile() {
           <section className="panel settings-panel">
             <Shield size={24} />
             <h2>Keep your account secure.</h2>
-            <p className="muted">Password resets end all existing sessions.</p>
+            <p className="muted">
+              {user.hasPassword
+                ? 'Password resets end all existing sessions.'
+                : 'You currently sign in with Google. You can also create a password by using the reset link.'}
+            </p>
             <Link className="btn outline" to="/forgot">
-              Reset password
+              {user.hasPassword ? 'Reset password' : 'Create a password'}
             </Link>
           </section>
           <section className="panel settings-panel spaced">
@@ -433,7 +455,10 @@ export function Profile() {
               const f = new FormData(e.currentTarget);
               setBusy(true);
               try {
-                await api('/account/' + action, 'POST', { password: f.get('password') });
+                await api('/account/' + action, 'POST', {
+                  password: f.get('password'),
+                  confirmation: f.get('confirmation'),
+                });
                 await reloadUser();
                 navigate('/');
                 setAction(null);
@@ -447,10 +472,17 @@ export function Profile() {
               }
             }}
           >
-            <label>
-              Confirm with your password
-              <input type="password" name="password" required autoComplete="current-password" />
-            </label>
+            {user.hasPassword ? (
+              <label>
+                Confirm with your password
+                <input type="password" name="password" required autoComplete="current-password" />
+              </label>
+            ) : (
+              <label>
+                Type {action.toUpperCase()} to confirm
+                <input name="confirmation" required autoComplete="off" />
+              </label>
+            )}
             {error && (
               <p className="form-error" role="alert">
                 {error}
@@ -463,6 +495,108 @@ export function Profile() {
         </Modal>
       )}
     </>
+  );
+}
+
+const onboardingSteps = [
+  {
+    icon: Activity,
+    eyebrow: 'WELCOME TO STATARENA',
+    title: 'Your home for the game.',
+    body: 'Explore sourced NFL schedules, results, teams, players, and season statistics from one clear dashboard.',
+  },
+  {
+    icon: Star,
+    eyebrow: 'MAKE IT YOURS',
+    title: 'Follow your favorites.',
+    body: 'Save the teams and players you care about so your personal arena keeps the right stories close.',
+  },
+  {
+    icon: Users,
+    eyebrow: 'FIND YOUR PEOPLE',
+    title: 'Join the conversation.',
+    body: 'Enter team communities or NFL Central, publish discussions, comment, vote in polls, and react to great takes.',
+  },
+  {
+    icon: Target,
+    eyebrow: 'CALL THE GAME',
+    title: 'Make friendly predictions.',
+    body: 'Pick winners before kickoff, track your results, and see how your record stacks up on the leaderboard.',
+  },
+  {
+    icon: GitCompareArrows,
+    eyebrow: 'GO DEEPER',
+    title: 'Search, compare, discover.',
+    body: 'Search the arena, compare player production side by side, and use the navigation to explore every feature.',
+  },
+];
+
+export function Onboarding() {
+  const { user, reloadUser, notify } = useApp();
+  const [step, setStep] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  if (!user || user.onboardingComplete) return null;
+  const current = onboardingSteps[step];
+  const Icon = current.icon;
+  return (
+    <Modal title={`Getting started · ${step + 1} of ${onboardingSteps.length}`}>
+      <section className="onboarding" aria-live="polite">
+        <div
+          className="onboarding-progress"
+          aria-label={`Step ${step + 1} of ${onboardingSteps.length}`}
+        >
+          {onboardingSteps.map((_, index) => (
+            <span key={index} className={index <= step ? 'active' : ''} />
+          ))}
+        </div>
+        <span className="onboarding-icon">
+          <Icon size={30} />
+        </span>
+        <p className="eyebrow">{current.eyebrow}</p>
+        <h3>{current.title}</h3>
+        <p>{current.body}</p>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="onboarding-actions">
+          <button
+            className="btn outline"
+            disabled={step === 0 || busy}
+            onClick={() => setStep((value) => value - 1)}
+          >
+            <ArrowLeft size={16} /> Back
+          </button>
+          {step < onboardingSteps.length - 1 ? (
+            <button className="btn dark" onClick={() => setStep((value) => value + 1)}>
+              Next <ArrowRight size={16} />
+            </button>
+          ) : (
+            <button
+              className="btn dark"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                setError('');
+                try {
+                  await api('/onboarding/complete', 'POST');
+                  await reloadUser();
+                  notify('Welcome to StatArena.');
+                } catch (e) {
+                  setError((e as Error).message);
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {busy ? 'Finishing…' : 'Enter the arena'} <ArrowRight size={16} />
+            </button>
+          )}
+        </div>
+      </section>
+    </Modal>
   );
 }
 export function PublicProfile() {

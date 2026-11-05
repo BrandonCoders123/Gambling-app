@@ -116,6 +116,61 @@ test('registration requires verification, enforces uniqueness, and uses one-use 
   assert.match(u.password_hash, /^scrypt:/);
   assert.ok(!u.password_hash.includes(secret));
 });
+test('Google OAuth creates a local user, keeps the secret server-side, and completes onboarding', async () => {
+  process.env.GOOGLE_CLIENT_ID = 'test-client.apps.googleusercontent.com';
+  process.env.GOOGLE_CLIENT_SECRET = 'server-only-test-secret';
+  const calls: { url: string; body?: string; authorization?: string }[] = [];
+  const oauthApp = createApp(db, {
+    oauthFetch: async (input, init) => {
+      const url = String(input);
+      calls.push({
+        url,
+        body: init?.body?.toString(),
+        authorization: new Headers(init?.headers).get('authorization') || undefined,
+      });
+      if (url.includes('/token'))
+        return new Response(JSON.stringify({ access_token: 'google-access-token' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      return new Response(
+        JSON.stringify({
+          sub: 'google-user-123',
+          email: 'googlefan@example.com',
+          email_verified: true,
+          name: 'Google Fan',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    },
+  });
+  const agent = request.agent(oauthApp);
+  const start = await agent.get('/api/auth/google/start').expect(302);
+  const authorization = new URL(start.headers.location);
+  assert.equal(authorization.origin, 'https://accounts.google.com');
+  assert.equal(authorization.searchParams.get('client_id'), process.env.GOOGLE_CLIENT_ID);
+  assert.equal(authorization.searchParams.get('code_challenge_method'), 'S256');
+  assert.ok(!start.headers.location.includes(process.env.GOOGLE_CLIENT_SECRET));
+  const state = authorization.searchParams.get('state');
+  await agent
+    .get('/api/auth/google/callback')
+    .query({ state, code: 'authorization-code' })
+    .expect(302)
+    .expect('Location', '/');
+  const me = await agent.get('/api/auth/me').expect(200);
+  assert.equal(me.body.data.email, 'googlefan@example.com');
+  assert.equal(me.body.data.hasPassword, false);
+  assert.equal(me.body.data.onboardingComplete, false);
+  assert.match(calls[0].body || '', /client_secret=server-only-test-secret/);
+  assert.equal(calls[1].authorization, 'Bearer google-access-token');
+  const completed = await write(agent, 'post', '/api/onboarding/complete').expect(200);
+  assert.equal(completed.body.data.onboardingComplete, true);
+  const [stored] = await db.query('SELECT * FROM users WHERE google_subject=$1', [
+    'google-user-123',
+  ]);
+  assert.equal(stored.email, 'googlefan@example.com');
+  assert.equal(stored.password_hash, null);
+});
 test('profile updates keep email and authentication fields private', async () => {
   await write(alice.agent, 'patch', '/api/profile', {
     username: 'alice',

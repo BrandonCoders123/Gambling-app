@@ -62,6 +62,10 @@ test('register, verify, sign in, follow, join, post, comment, poll, and sign out
   await page.getByLabel('Email address', { exact: true }).fill(email);
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Getting started · 1 of 5' })).toBeVisible();
+  for (let step = 0; step < 4; step++)
+    await page.getByRole('button', { name: 'Next', exact: true }).click();
+  await page.getByRole('button', { name: 'Enter the arena', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Welcome back, ' + name + '.' })).toBeVisible();
   await page.goto('/teams');
   await page.getByRole('button', { name: 'Follow KC', exact: true }).click();

@@ -14,6 +14,8 @@ export type User = {
   email: string;
   bio: string;
   role: 'user' | 'moderator' | 'admin';
+  hasPassword: boolean;
+  onboardingComplete: boolean;
 };
 export type Team = {
   id: string;
@@ -219,7 +221,7 @@ export function Modal({
 }: {
   title: string;
   children: ReactNode;
-  onClose: () => void;
+  onClose?: () => void;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const close = useRef(onClose);
@@ -227,7 +229,10 @@ export function Modal({
   useEffect(() => {
     const el = ref.current!;
     el.showModal();
-    const handler = () => close.current();
+    const handler = (event: Event) => {
+      if (close.current) close.current();
+      else event.preventDefault();
+    };
     el.addEventListener('cancel', handler);
     return () => {
       el.removeEventListener('cancel', handler);
@@ -239,14 +244,16 @@ export function Modal({
       ref={ref}
       aria-labelledby="modal-title"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget && onClose) onClose();
       }}
     >
       <div className="modal-head">
         <h2 id="modal-title">{title}</h2>
-        <button className="icon-btn" aria-label="Close dialog" onClick={onClose}>
-          <X />
-        </button>
+        {onClose && (
+          <button className="icon-btn" aria-label="Close dialog" onClick={onClose}>
+            <X />
+          </button>
+        )}
       </div>
       {children}
     </dialog>

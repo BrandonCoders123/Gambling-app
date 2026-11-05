@@ -2273,6 +2273,51 @@ tbody tr:hover {
   font-size: 11px;
   margin: 7px 0 24px;
 }
+.google-auth-button {
+  min-height: 44px;
+  border: 1px solid #d8ded3;
+  border-radius: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #314439;
+  font-size: 12px;
+  font-weight: 650;
+  background: #fff;
+  box-shadow: 0 1px 2px #1835260d;
+}
+.google-auth-button:hover {
+  border-color: #aebda5;
+  background: #fbfdf9;
+}
+.google-auth-button:focus-visible {
+  outline: 3px solid #b6d98b;
+  outline-offset: 2px;
+}
+.google-mark {
+  font-family: Arial, sans-serif;
+  font-size: 17px;
+  font-weight: 800;
+  color: #4285f4;
+}
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #7a8873;
+  font-size: 9px;
+  margin: 17px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  height: 1px;
+  flex: 1;
+  background: #e3e8de;
+}
 .form {
   display: flex;
   flex-direction: column;
@@ -2570,6 +2615,74 @@ dialog hr {
   border: 0;
   border-top: 1px solid var(--border);
   margin: 26px 0;
+}
+.onboarding {
+  min-height: 350px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.onboarding-progress {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 7px;
+  margin-bottom: 34px;
+}
+.onboarding-progress span {
+  height: 4px;
+  border-radius: 999px;
+  background: #e3e9dd;
+}
+.onboarding-progress span.active {
+  background: #6e914e;
+}
+.onboarding-icon {
+  display: grid;
+  place-items: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 16px;
+  background: #edf4e3;
+  color: #54733d;
+  margin-bottom: 22px;
+}
+.onboarding > .eyebrow {
+  color: #63804d;
+  margin-bottom: 9px;
+}
+.onboarding h3 {
+  color: #203e2d;
+  font-size: 30px;
+  letter-spacing: -1.2px;
+  margin-bottom: 13px;
+}
+.onboarding > p:not(.eyebrow):not(.form-error) {
+  color: #586b4f;
+  font-size: 13px;
+  line-height: 1.75;
+  max-width: 460px;
+}
+.onboarding .form-error {
+  width: 100%;
+  margin-top: 16px;
+}
+.onboarding-actions {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 35px;
+}
+.onboarding-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.onboarding-actions .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .toast {
   position: fixed;

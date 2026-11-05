@@ -8,6 +8,10 @@ CREATE TABLE IF NOT EXISTS users (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users(lower(email));
 CREATE UNIQUE INDEX IF NOT EXISTS users_username_unique ON users(lower(username));
+ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS google_subject text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed_at timestamptz;
+CREATE UNIQUE INDEX IF NOT EXISTS users_google_subject_unique ON users(google_subject) WHERE google_subject IS NOT NULL;
 CREATE TABLE IF NOT EXISTS sessions (
  token_hash text PRIMARY KEY, user_id uuid NOT NULL REFERENCES users ON DELETE CASCADE,
  expires_at timestamptz NOT NULL, created_at timestamptz NOT NULL DEFAULT now(), last_seen timestamptz NOT NULL DEFAULT now()
@@ -81,3 +85,5 @@ CREATE TABLE IF NOT EXISTS audit_logs (id uuid PRIMARY KEY, actor_id uuid REFERE
 CREATE TABLE IF NOT EXISTS activity_events (id uuid PRIMARY KEY, user_id uuid REFERENCES users ON DELETE CASCADE, kind text NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
 CREATE INDEX IF NOT EXISTS activity_dates ON activity_events(created_at,user_id);
 INSERT INTO schema_versions(version) VALUES (1) ON CONFLICT DO NOTHING;
+UPDATE users SET onboarding_completed_at=now() WHERE onboarding_completed_at IS NULL AND NOT EXISTS(SELECT 1 FROM schema_versions WHERE version=2);
+INSERT INTO schema_versions(version) VALUES (2) ON CONFLICT DO NOTHING;
